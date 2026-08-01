@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion";
+import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria";
 import {
   Users, Phone, KeyRound, UserRound, ShieldCheck, AlertCircle,
-  CheckCircle, XCircle, Mail,
+  CheckCircle, XCircle, Mail, MessageSquare,
 } from "lucide-react";
 
 /**
@@ -132,6 +134,14 @@ export default async function ClubDashboard() {
               <status.Icon className="w-3 h-3" />
               {status.label}
             </span>
+            <Link
+              href="/club/mensajeria"
+              className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-[#F97316] transition-colors"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span className="hidden sm:inline">Mensajería</span>
+              <BadgeMensajeria />
+            </Link>
             <div className="w-36 hidden sm:block"><BotonCerrarSesion /></div>
           </div>
         </div>
