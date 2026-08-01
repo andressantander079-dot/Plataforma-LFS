@@ -121,7 +121,15 @@ export default function BandejaInbox() {
                 </div>
                 <h4 className={`text-xs truncate ${!m.isRead ? "font-black text-[#1A2A44]" : "text-slate-700"}`}>{m.subject}</h4>
                 <div className="flex items-center justify-between mt-1">
-                  <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${m.importance === "Urgente" ? "bg-red-50 text-red-650" : "bg-slate-100 text-slate-550"}`}>{m.importance}</span>
+                  <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${
+                    m.importance === "Urgente"
+                      ? "bg-red-50 text-red-750 border-red-150 font-bold"
+                      : m.importance === "Importante"
+                      ? "bg-yellow-50 text-yellow-800 border-yellow-200 font-bold"
+                      : "bg-slate-50 text-slate-600 border-slate-200"
+                  }`}>
+                    {m.importance}
+                  </span>
                   <div className="flex gap-2">
                     <button onClick={(e) => { e.stopPropagation(); toggleRead(m.id); }} className="p-1 hover:bg-slate-200 rounded text-slate-400 transition" title={m.isRead ? "Marcar como No Leído" : "Marcar como Leído"}>
                       {m.isRead ? <MailOpen className="w-3.5 h-3.5" /> : <Mail className="w-3.5 h-3.5" />}
@@ -143,7 +151,18 @@ export default function BandejaInbox() {
                 <div className="border-b pb-4 mb-4">
                   <div className="flex justify-between items-center text-xs text-slate-400 font-bold">
                     <span>Remitente: {currentMsg.sender}</span>
-                    <span>{currentMsg.date}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${
+                        currentMsg.importance === "Urgente"
+                          ? "bg-red-50 text-red-750 border-red-150 font-bold"
+                          : currentMsg.importance === "Importante"
+                          ? "bg-yellow-50 text-yellow-800 border-yellow-200 font-bold"
+                          : "bg-slate-50 text-slate-600 border-slate-200"
+                      }`}>
+                        {currentMsg.importance}
+                      </span>
+                      <span>{currentMsg.date}</span>
+                    </div>
                   </div>
                   <h3 className="font-serif text-xl font-bold text-[#1A2A44] mt-2 leading-snug">{currentMsg.subject}</h3>
                 </div>
