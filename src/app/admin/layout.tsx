@@ -2,20 +2,20 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { 
-  Trophy, 
-  Users, 
-  FileText, 
-  ShieldCheck, 
-  Wallet, 
-  MessageSquare, 
-  ClipboardList, 
-  Scale, 
-  Settings, 
-  Menu, 
-  X, 
-  LogOut 
+import {
+  Trophy,
+  Users,
+  FileText,
+  ShieldCheck,
+  Wallet,
+  MessageSquare,
+  ClipboardList,
+  Scale,
+  Settings,
+  Menu,
+  X
 } from "lucide-react";
+import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion"
 
 export default function AdminLayout({
   children,
@@ -50,9 +50,8 @@ export default function AdminLayout({
       {/* Sidebar Fijo en Escritorio y Desplizable en Móvil */}
       <aside
         id="admin-sidebar"
-        className={`w-64 bg-[#1A2A44] text-white flex flex-col justify-between p-4 z-40 transition-all duration-300 fixed md:sticky top-0 h-screen ${
-          isSidebarOpen ? "left-0" : "-left-64 md:left-0"
-        }`}
+        className={`w-64 bg-[#1A2A44] text-white flex flex-col justify-between p-4 z-40 transition-all duration-300 fixed md:sticky top-0 h-screen ${isSidebarOpen ? "left-0" : "-left-64 md:left-0"
+          }`}
       >
         <div className="flex flex-col gap-6">
           {/* Logo / Header */}
@@ -94,13 +93,7 @@ export default function AdminLayout({
               <span className="text-[9px] text-[#F97316] font-bold">Acceso Total</span>
             </div>
           </div>
-          <Link
-            href="/"
-            className="flex items-center gap-3 px-4 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 hover:text-red-300 transition"
-          >
-            <LogOut className="w-4 h-4" />
-            Cerrar Sesión
-          </Link>
+          <BotonCerrarSesion />
         </div>
       </aside>
 
