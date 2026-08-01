@@ -1,39 +1,60 @@
-"use client";
-
 import Link from "next/link";
-import { Users, Plus, ShieldCheck, Phone, CheckCircle, XCircle, AlertCircle, Eye } from "lucide-react";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import {
+  Users, Plus, Phone, CheckCircle, XCircle, AlertCircle, Eye, UserRound,
+} from "lucide-react";
 
-const MOCK_CLUBS = [
-  {
-    id: "club-1",
-    name: "Club Camioneros Ushuaia",
-    president: "Guillermo Vargas",
-    presidentPhone: "+54 2901 442211",
-    treasurer: "Roberto Gómez",
-    status: "Habilitado",
-    color: "border-green-500",
-  },
-  {
-    id: "club-2",
-    name: "HAF Ushuaia",
-    president: "Daniel Pérez",
-    presidentPhone: "+54 2901 556677",
-    treasurer: "Juan Castro",
-    status: "En revisión",
-    color: "border-orange-500",
-  },
-  {
-    id: "club-3",
-    name: "Club Galicia Ushuaia",
-    president: "Carlos Albarracín",
-    presidentPhone: "+54 2901 889900",
-    treasurer: "Diego Torres",
-    status: "Inhabilitado",
-    color: "border-red-500",
-  },
-];
+/**
+ * LISTADO DE CLUBES (datos reales desde Supabase)
+ * Es un Server Component: los datos se traen en el servidor,
+ * no hay mocks ni estados falsos.
+ */
 
-export default function EquiposAdmin() {
+interface Club {
+  id: string;
+  name: string;
+  president_name: string | null;
+  president_dni: string;
+  president_phone: string;
+  treasurer_name: string | null;
+  treasurer_dni: string;
+  treasurer_phone: string;
+  status: "inhabilitado" | "en_revision" | "habilitado";
+}
+
+const STATUS_UI = {
+  habilitado: {
+    label: "Habilitado",
+    border: "border-green-500",
+    badge: "bg-green-50 text-green-700",
+    Icon: CheckCircle,
+  },
+  en_revision: {
+    label: "En revisión",
+    border: "border-orange-500",
+    badge: "bg-orange-50 text-orange-700",
+    Icon: AlertCircle,
+  },
+  inhabilitado: {
+    label: "Inhabilitado",
+    border: "border-red-500",
+    badge: "bg-red-50 text-red-700",
+    Icon: XCircle,
+  },
+} as const;
+
+export default async function EquiposAdmin() {
+  const supabase = await createLfsServerClient();
+
+  const { data: clubs, error } = await supabase
+    .from("clubs")
+    .select(
+      "id, name, president_name, president_dni, president_phone, treasurer_name, treasurer_dni, treasurer_phone, status"
+    )
+    .order("name");
+
+  const lista = (clubs ?? []) as Club[];
+
   return (
     <div className="flex flex-col gap-6">
       {/* Encabezado */}
@@ -58,73 +79,109 @@ export default function EquiposAdmin() {
         </Link>
       </section>
 
+      {/* Error de conexión */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-2xl px-5 py-4">
+          No se pudieron cargar los clubes: {error.message}
+        </div>
+      )}
+
+      {/* Estado vacío: todavía no hay clubes */}
+      {!error && lista.length === 0 && (
+        <section className="bg-white border border-dashed border-slate-300 rounded-2xl p-12 flex flex-col items-center text-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-[#1A2A44]/5 flex items-center justify-center">
+            <Users className="w-7 h-7 text-[#F97316]" />
+          </div>
+          <div>
+            <h3 className="font-serif text-lg font-bold text-[#1A2A44]">
+              Todavía no hay clubes registrados
+            </h3>
+            <p className="text-slate-500 text-sm mt-1">
+              Registrá el primer club de la liga para empezar a cargar planteles.
+            </p>
+          </div>
+          <Link
+            href="/admin/equipos/crear"
+            className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold bg-[#F97316] hover:bg-[#F97316]/95 text-white transition text-xs"
+          >
+            <Plus className="w-4 h-4" />
+            Registrar el primer club
+          </Link>
+        </section>
+      )}
+
       {/* Tarjetas de Clubes */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {MOCK_CLUBS.map((club) => (
-          <div
-            key={club.id}
-            className={`bg-white rounded-2xl border-l-4 ${club.color} border-y border-r border-slate-200/80 p-5 flex flex-col justify-between shadow-sm hover:shadow transition duration-250`}
-          >
-            <div>
-              {/* Encabezado */}
-              <div className="flex justify-between items-center mb-3">
-                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded flex items-center gap-1 ${
-                  club.status === "Habilitado"
-                    ? "bg-green-50 text-green-700"
-                    : club.status === "En revisión"
-                    ? "bg-orange-50 text-orange-700"
-                    : "bg-red-50 text-red-750"
-                }`}>
-                  {club.status === "Habilitado" ? (
-                    <CheckCircle className="w-3 h-3" />
-                  ) : club.status === "En revisión" ? (
-                    <AlertCircle className="w-3 h-3" />
-                  ) : (
-                    <XCircle className="w-3 h-3" />
-                  )}
-                  {club.status}
-                </span>
-                <span className="text-[10px] text-slate-400 font-bold">LFS v3.0</span>
+        {lista.map((club) => {
+          const ui = STATUS_UI[club.status] ?? STATUS_UI.inhabilitado;
+          return (
+            <div
+              key={club.id}
+              className={`bg-white rounded-2xl border-l-4 ${ui.border} border-y border-r border-slate-200/80 p-5 flex flex-col justify-between shadow-sm hover:shadow transition duration-250`}
+            >
+              <div>
+                {/* Encabezado */}
+                <div className="flex justify-between items-center mb-3">
+                  <span
+                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded flex items-center gap-1 ${ui.badge}`}
+                  >
+                    <ui.Icon className="w-3 h-3" />
+                    {ui.label}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-bold">LFS v3.0</span>
+                </div>
+
+                <h4 className="font-serif text-lg font-bold text-[#1A2A44] mb-3">
+                  {club.name}
+                </h4>
+
+                {/* Contactos */}
+                <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 mb-6">
+                  <div>
+                    <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                      Presidente
+                    </span>
+                    <p className="text-slate-700 text-xs font-bold flex items-center gap-1">
+                      <UserRound className="w-3 h-3 text-slate-400" />
+                      {club.president_name ?? `DNI ${club.president_dni}`}
+                    </p>
+                    <p className="text-slate-500 text-[10px] flex items-center gap-1 mt-0.5">
+                      <Phone className="w-3 h-3 text-[#F97316]" /> {club.president_phone}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                      Tesorero
+                    </span>
+                    <p className="text-slate-700 text-xs font-bold">
+                      {club.treasurer_name ?? `DNI ${club.treasurer_dni}`}
+                    </p>
+                    <p className="text-slate-500 text-[10px] flex items-center gap-1 mt-0.5">
+                      <Phone className="w-3 h-3 text-[#F97316]" /> {club.treasurer_phone}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <h4 className="font-serif text-lg font-bold text-[#1A2A44] mb-3">
-                {club.name}
-              </h4>
-
-              {/* Contactos */}
-              <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 mb-6">
-                <div>
-                  <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Presidente</span>
-                  <p className="text-slate-700 text-xs font-bold">{club.president}</p>
-                  <p className="text-slate-500 text-[10px] flex items-center gap-1 mt-0.5">
-                    <Phone className="w-3 h-3 text-[#F97316]" /> {club.presidentPhone}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Tesorero</span>
-                  <p className="text-slate-700 text-xs font-bold">{club.treasurer}</p>
-                </div>
+              {/* Accesos rápidos */}
+              <div className="flex gap-2">
+                <Link
+                  href={`/admin/equipos/${club.id}/plantel`}
+                  className="flex-1 px-3 py-2 bg-[#1A2A44]/5 hover:bg-[#1A2A44] text-[#1A2A44] hover:text-white rounded-lg font-bold text-[10px] transition text-center flex items-center justify-center gap-1.5"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Ver Plantel
+                </Link>
+                <Link
+                  href={`/admin/equipos/${club.id}/finanzas`}
+                  className="px-3 py-2 bg-slate-50 hover:bg-[#F97316] hover:text-white text-slate-650 rounded-lg font-bold text-[10px] transition text-center"
+                >
+                  Finanzas
+                </Link>
               </div>
             </div>
-
-            {/* Accesos rápidos */}
-            <div className="flex gap-2">
-              <Link
-                href={`/admin/equipos/${club.id}/plantel`}
-                className="flex-1 px-3 py-2 bg-[#1A2A44]/5 hover:bg-[#1A2A44] text-[#1A2A44] hover:text-white rounded-lg font-bold text-[10px] transition text-center flex items-center justify-center gap-1.5"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                Ver Plantel
-              </Link>
-              <Link
-                href={`/admin/equipos/${club.id}/finanzas`}
-                className="px-3 py-2 bg-slate-50 hover:bg-[#F97316] hover:text-white text-slate-650 rounded-lg font-bold text-[10px] transition text-center"
-              >
-                Finanzas
-              </Link>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </section>
     </div>
   );
