@@ -213,7 +213,12 @@ export async function obtenerMensajes(conversacionId: string) {
 
 /** Cantidad de mensajes sin leer dirigidos al usuario actual (para el badge). */
 export async function contarNoLeidos(): Promise<number> {
-  const { supabase, user } = await obtenerUsuarioOError();
+  // Si no hay sesión (visitante o sesión expirada), el badge muestra 0.
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return 0;
 
   const { count, error } = await supabase
     .from("messages")
