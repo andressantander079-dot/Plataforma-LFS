@@ -1,96 +1,109 @@
-"use client";
-
+import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Trophy, Plus, FileText, Calendar, Archive, Eye } from "lucide-react";
+import { Trophy, Plus, MapPin, Users, CalendarRange } from "lucide-react";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 
-const MOCK_COMPETITIONS = [
-  { id: "c1", name: "Torneo Apertura 2026", year: 2026, category: "Primera", gender: "Masculino", teamsCount: 8, status: "Activo" },
-  { id: "c2", name: "Copa Femenina Ushuaia 2026", year: 2026, category: "Primera", gender: "Femenino", teamsCount: 6, status: "Activo" },
-  { id: "c3", name: "Torneo Clausura 2025", year: 2025, category: "Sub-18", gender: "Masculino", teamsCount: 10, status: "Archivado" },
-];
+/**
+ * COMPETENCIAS — Lista de torneos (admin)
+ */
 
-export default function CompetenciasAdmin() {
+const ESTADO_UI: Record<string, { label: string; className: string }> = {
+  borrador: { label: "Borrador", className: "bg-slate-100 text-slate-600" },
+  en_curso: { label: "En curso", className: "bg-green-100 text-green-700" },
+  finalizado: { label: "Finalizado", className: "bg-[#1A2A44]/10 text-[#1A2A44]" },
+};
+
+export default async function AdminCompetencias() {
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: torneos } = await supabase
+    .from("competitions")
+    .select("id, name, season, format, status, categories(name), competition_teams(count), matches(count)")
+    .order("created_at", { ascending: false });
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* Encabezado */}
-      <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 pb-5">
+    <div className="flex flex-col gap-6 max-w-6xl mx-auto">
+      <div className="border-b border-slate-200 pb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-serif text-3xl font-black text-[#1A2A44] flex items-center gap-3">
-            <Trophy className="w-8 h-8 text-[#F97316]" />
-            Gestión de Competencias
-          </h2>
-          <p className="text-slate-500 text-sm mt-1">
-            Administra, crea y edita los torneos oficiales y copas de la LFS.
+          <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
+            <Trophy className="w-7 h-7 text-[#F97316]" />
+            Competencias
+          </h1>
+          <p className="text-slate-500 text-xs mt-0.5">
+            Torneos por categoría: equipos, fixture, resultados y tablas.
           </p>
         </div>
-
-        <Link
-          href="/admin/competencias/crear"
-          id="btn-create-competition"
-          className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold bg-[#F97316] hover:bg-[#F97316]/95 text-white transition shadow-lg shadow-[#F97316]/20 text-xs self-stretch sm:self-auto text-center justify-center"
-        >
-          <Plus className="w-4 h-4" />
-          Nueva Competencia
-        </Link>
-      </section>
-
-      {/* Lista de Competencias Activas */}
-      <section className="flex flex-col gap-4">
-        <h3 className="font-sans text-xs font-black tracking-widest text-slate-400 uppercase">
-          Torneos en Curso
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {MOCK_COMPETITIONS.map((comp) => (
-            <div
-              key={comp.id}
-              className="bg-white rounded-2xl border border-slate-200/80 p-5 flex flex-col justify-between shadow-sm hover:shadow-md transition duration-250"
-            >
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
-                    comp.status === "Activo"
-                      ? "bg-green-50 text-green-700 border border-green-150"
-                      : "bg-slate-100 text-slate-500 border border-slate-200"
-                  }`}>
-                    {comp.status}
-                  </span>
-                  <span className="font-mono text-xs font-bold text-slate-400">Año {comp.year}</span>
-                </div>
-                <h4 className="font-serif text-lg font-bold text-[#1A2A44] mb-2 leading-snug">
-                  {comp.name}
-                </h4>
-                <p className="text-xs text-slate-500 mb-4 font-semibold">
-                  Categoría: {comp.category} • Rama: {comp.gender}
-                </p>
-                <div className="flex items-center gap-2 mb-6">
-                  <span className="text-slate-400 text-xs font-bold">{comp.teamsCount} Equipos</span>
-                  <span className="text-slate-350">•</span>
-                  <span className="text-slate-400 text-xs font-semibold">Fútbol Sala</span>
-                </div>
-              </div>
-
-              {/* Botones de acción del admin */}
-              <div className="border-t border-slate-100 pt-4 flex gap-2">
-                <Link
-                  href={`/admin/competencias/${comp.id}`}
-                  className="flex-1 px-3 py-2 bg-slate-50 hover:bg-[#1A2A44] hover:text-white rounded-lg font-bold text-[10px] text-slate-700 transition flex items-center justify-center gap-1.5"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  Detalle
-                </Link>
-                <Link
-                  href={`/admin/competencias/${comp.id}/fixture`}
-                  className="flex-1 px-3 py-2 bg-slate-50 hover:bg-[#1A2A44] hover:text-white rounded-lg font-bold text-[10px] text-slate-700 transition flex items-center justify-center gap-1.5"
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  Fixture
-                </Link>
-              </div>
-            </div>
-          ))}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/competencias/canchas"
+            className="px-4 py-2.5 rounded-xl border border-slate-300 text-[#1A2A44] text-xs font-bold hover:border-[#F97316] hover:text-[#F97316] transition flex items-center gap-1.5"
+          >
+            <MapPin className="w-4 h-4" /> Canchas
+          </Link>
+          <Link
+            href="/admin/competencias/crear"
+            className="px-4 py-2.5 rounded-xl bg-[#F97316] text-white text-xs font-bold hover:bg-[#F97316]/90 transition shadow-md flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Crear Torneo
+          </Link>
         </div>
-      </section>
+      </div>
+
+      {(torneos ?? []).length === 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center flex flex-col items-center gap-3 shadow-sm">
+          <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center">
+            <Trophy className="w-6 h-6 text-slate-400" />
+          </div>
+          <p className="font-serif text-lg font-bold text-[#1A2A44]">Todavía no hay torneos</p>
+          <p className="text-xs text-slate-500 max-w-sm">
+            Creá el primero con el botón de arriba. Los clubes habilitados se inscriben
+            automáticamente y después generás el fixture con un clic.
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {(torneos ?? []).map((t) => {
+          const categoria = (t.categories as unknown as { name: string } | null)?.name ?? "—";
+          const equipos = (t.competition_teams as unknown as { count: number }[])[0]?.count ?? 0;
+          const partidos = (t.matches as unknown as { count: number }[])[0]?.count ?? 0;
+          const estado = ESTADO_UI[t.status] ?? ESTADO_UI.borrador;
+
+          return (
+            <Link
+              key={t.id}
+              href={`/admin/competencias/${t.id}`}
+              className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:border-[#F97316]/60 hover:shadow-md transition flex flex-col gap-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="font-serif text-lg font-black text-[#1A2A44] truncate">
+                    {t.name}
+                  </h2>
+                  <p className="text-[11px] text-slate-500">
+                    {categoria} · Temporada {t.season} · {t.format === "liga" ? "Liga" : t.format}
+                  </p>
+                </div>
+                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 ${estado.className}`}>
+                  {estado.label}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 text-[11px] text-slate-500">
+                <span className="flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-[#F97316]" /> {equipos} equipos
+                </span>
+                <span className="flex items-center gap-1">
+                  <CalendarRange className="w-3.5 h-3.5 text-[#F97316]" /> {partidos} partidos
+                </span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
     </div>
   );
 }

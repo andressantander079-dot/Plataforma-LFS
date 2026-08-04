@@ -16,6 +16,7 @@ import {
   X
 } from "lucide-react";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion"
+import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria"
 
 export default function AdminLayout({
   children,
@@ -32,7 +33,7 @@ export default function AdminLayout({
     { name: "Trámites", href: "/admin/tramites/pendientes", icon: ClipboardList },
     { name: "Colegio de Árbitros", href: "/admin/colegiodearbitros", icon: ShieldCheck },
     { name: "Tribunal de Disciplina", href: "/admin/tribunal/sanciones", icon: Scale },
-    { name: "Mensajería", href: "/admin/mensajeria/bandeja", icon: MessageSquare },
+    { name: "Mensajería", href: "/admin/mensajeria", icon: MessageSquare },
     { name: "Configuración", href: "/admin/configuracion/general", icon: Settings },
   ];
 
@@ -77,6 +78,7 @@ export default function AdminLayout({
               >
                 <item.icon className="w-4 h-4 text-slate-450" />
                 {item.name}
+                {item.href === "/admin/mensajeria" && <BadgeMensajeria />}
               </Link>
             ))}
           </nav>

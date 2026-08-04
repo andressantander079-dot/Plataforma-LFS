@@ -1,78 +1,206 @@
-"use client";
-
-import { useParams, useRouter } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { Trophy, ArrowLeft, Calendar, BarChart3, Users, Clock } from "lucide-react";
+import { ArrowLeft, Trophy, Users, CalendarRange, ListOrdered } from "lucide-react";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { calcularTabla, vallaMenosVencida } from "@/lib/core/competencias/tabla";
+import { cantidadFechas, cantidadPartidos } from "@/lib/core/competencias/fixture";
+import { TablaPosiciones } from "@/components/competencias/TablaPosiciones";
+import { FixtureEditable, type PartidoUI } from "@/components/competencias/FixtureEditable";
+import { GestionEquiposTorneo } from "@/components/competencias/GestionEquiposTorneo";
+import { AccionesTorneo } from "@/components/competencias/AccionesTorneo";
+import { BotonGenerarFixture } from "@/components/competencias/BotonGenerarFixture";
 
-export default function CompetenciaDetailAdmin() {
-  const params = useParams();
-  const router = useRouter();
-  const compId = params.id as string;
+/**
+ * DETALLE DE TORNEO (admin)
+ * Equipos inscriptos · Fixture editable · Tabla de posiciones automática.
+ */
 
-  const comp = {
-    id: compId,
-    name: "Torneo Apertura LFS 2026",
-    year: 2026,
-    category: "Primera División",
-    gender: "Masculino",
-    teamsCount: 8,
-    status: "Activo"
-  };
+const FORMATO_UI: Record<string, string> = {
+  liga: "Liga — todos contra todos",
+  eliminacion: "Eliminación directa",
+  grupos_playoffs: "Grupos + Playoffs",
+  liga_playoffs: "Liga + Playoffs",
+};
+
+export default async function DetalleTorneo({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: torneo } = await supabase
+    .from("competitions")
+    .select("*, categories(name)")
+    .eq("id", id)
+    .single();
+  if (!torneo) notFound();
+
+  const [
+    { data: inscripciones },
+    { data: partidos },
+    { data: canchas },
+    { data: arbitros },
+    { data: clubes },
+  ] = await Promise.all([
+    supabase
+      .from("competition_teams")
+      .select("team_id, teams(id, name, club_id, clubs(name))")
+      .eq("competition_id", id)
+      .order("created_at"),
+    supabase
+      .from("matches")
+      .select("*")
+      .eq("competition_id", id)
+      .order("matchday", { ascending: true, nullsFirst: false })
+      .order("created_at"),
+    supabase.from("venues").select("id, name").order("name"),
+    supabase.from("profiles").select("id, full_name").eq("role", "arbitro").order("full_name"),
+    supabase.from("clubs").select("id, name").eq("status", "habilitado").order("name"),
+  ]);
+
+  const equipos = (inscripciones ?? []).map((i) => {
+    const team = i.teams as unknown as { id: string; name: string; clubs: { name: string } | null };
+    return {
+      teamId: team.id,
+      nombre: team.name,
+      clubNombre: team.clubs?.name ?? "",
+    };
+  });
+
+  const nombreEquipo = new Map(equipos.map((e) => [e.teamId, e.nombre]));
+  const nombreCancha = new Map((canchas ?? []).map((c) => [c.id, c.name]));
+  const nombreArbitro = new Map((arbitros ?? []).map((a) => [a.id, a.full_name]));
+
+  const partidosUI: PartidoUI[] = (partidos ?? []).map((p) => ({
+    id: p.id,
+    matchday: p.matchday,
+    round: p.round,
+    homeNombre: nombreEquipo.get(p.home_team_id) ?? "—",
+    awayNombre: nombreEquipo.get(p.away_team_id) ?? "—",
+    scheduled_at: p.scheduled_at,
+    venueNombre: p.venue_id ? (nombreCancha.get(p.venue_id) ?? null) : null,
+    referee_id: p.referee_id,
+    refereeNombre: p.referee_id ? (nombreArbitro.get(p.referee_id) ?? null) : null,
+    status: p.status,
+    home_score: p.home_score,
+    away_score: p.away_score,
+    result_confirmed: p.result_confirmed,
+    notes: p.notes,
+  }));
+
+  // Tabla: solo resultados confirmados por la federación
+  const confirmados = (partidos ?? []).filter(
+    (p) => p.result_confirmed && p.home_score !== null && p.away_score !== null
+  );
+  const tabla = calcularTabla(
+    equipos.map((e) => e.teamId),
+    confirmados.map((p) => ({
+      homeTeamId: p.home_team_id,
+      awayTeamId: p.away_team_id,
+      homeScore: p.home_score,
+      awayScore: p.away_score,
+    })),
+    {
+      pointsWin: torneo.points_win,
+      pointsDraw: torneo.points_draw,
+      pointsLoss: torneo.points_loss,
+      tiebreaker: torneo.tiebreaker,
+    }
+  );
+  const valla = vallaMenosVencida(tabla);
+  const filasConNombre = tabla.map((f) => ({
+    ...f,
+    nombre: nombreEquipo.get(f.teamId) ?? "—",
+  }));
+
+  const categoria = (torneo.categories as unknown as { name: string } | null)?.name ?? "—";
+  const hayFixture = (partidos ?? []).length > 0;
 
   return (
-    <div className="flex flex-col gap-6 max-w-4xl mx-auto">
+    <div className="flex flex-col gap-6 max-w-6xl mx-auto">
       {/* Encabezado */}
-      <section className="flex items-center gap-4 border-b border-slate-200 pb-5">
-        <button
-          type="button"
-          onClick={() => router.push("/admin/competencias")}
-          className="p-2 hover:bg-slate-200 rounded-xl transition text-[#1A2A44]"
+      <div className="border-b border-slate-200 pb-4 flex flex-col gap-3">
+        <Link
+          href="/admin/competencias"
+          className="text-xs font-bold text-slate-400 hover:text-[#F97316] transition flex items-center gap-1"
         >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <div>
-          <h2 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
-            <Trophy className="w-7 h-7 text-[#F97316]" />
-            {comp.name}
-          </h2>
-          <p className="text-slate-500 text-xs mt-0.5">Ficha de torneo y accesos de administración del fixture.</p>
+          <ArrowLeft className="w-3.5 h-3.5" /> Volver a Competencias
+        </Link>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
+              <Trophy className="w-7 h-7 text-[#F97316]" />
+              {torneo.name}
+            </h1>
+            <p className="text-slate-500 text-xs mt-0.5">
+              {categoria} · Temporada {torneo.season} · {FORMATO_UI[torneo.format]} ·{" "}
+              {torneo.rounds === 2 ? "Ida y vuelta" : "Solo ida"} · Puntos {torneo.points_win}/
+              {torneo.points_draw}/{torneo.points_loss}
+            </p>
+          </div>
+          <AccionesTorneo competitionId={id} estado={torneo.status} />
         </div>
+      </div>
+
+      {/* Equipos */}
+      <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+        <h2 className="font-serif text-base font-black text-[#1A2A44] flex items-center gap-2">
+          <Users className="w-4 h-4 text-[#F97316]" />
+          Equipos inscriptos ({equipos.length})
+        </h2>
+        <GestionEquiposTorneo
+          competitionId={id}
+          equipos={equipos}
+          clubesDisponibles={(clubes ?? []).map((c) => ({ id: c.id, nombre: c.name }))}
+        />
       </section>
 
-      {/* Grid de Accesos de Torneo */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Link href={`/admin/competencias/${compId}/fixture`} className="bg-white border p-5 rounded-2xl flex flex-col justify-between hover:border-[#F97316] transition shadow-sm h-32">
-          <Calendar className="w-6 h-6 text-[#1A2A44]" />
-          <div>
-            <h4 className="font-serif font-bold text-sm text-[#1A2A44]">Gestionar Fixture</h4>
-            <p className="text-[10px] text-slate-450 mt-0.5">Fechas y horarios de juego</p>
-          </div>
-        </Link>
+      {/* Fixture */}
+      <section className="flex flex-col gap-3">
+        <h2 className="font-serif text-base font-black text-[#1A2A44] flex items-center gap-2">
+          <CalendarRange className="w-4 h-4 text-[#F97316]" />
+          Fixture
+        </h2>
 
-        <Link href={`/admin/competencias/${compId}/playoffs`} className="bg-white border p-5 rounded-2xl flex flex-col justify-between hover:border-[#F97316] transition shadow-sm h-32">
-          <Trophy className="w-6 h-6 text-[#1A2A44]" />
-          <div>
-            <h4 className="font-serif font-bold text-sm text-[#1A2A44]">Playoffs / Brackets</h4>
-            <p className="text-[10px] text-slate-450 mt-0.5">Eliminación directa brackets</p>
+        {!hayFixture && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm flex flex-col items-center gap-3 text-center">
+            <p className="text-sm text-slate-500 max-w-md">
+              Con {equipos.length} equipos a {torneo.rounds === 2 ? "ida y vuelta" : "una vuelta"}{" "}
+              el torneo tendrá <strong>{cantidadPartidos(equipos.length, torneo.rounds)}</strong>{" "}
+              partidos en <strong>{cantidadFechas(equipos.length, torneo.rounds)}</strong> fechas.
+            </p>
+            <BotonGenerarFixture competitionId={id} cantidadEquipos={equipos.length} />
           </div>
-        </Link>
+        )}
 
-        <Link href={`/admin/competencias/${compId}/posiciones`} className="bg-white border p-5 rounded-2xl flex flex-col justify-between hover:border-[#F97316] transition shadow-sm h-32">
-          <BarChart3 className="w-6 h-6 text-[#1A2A44]" />
-          <div>
-            <h4 className="font-serif font-bold text-sm text-[#1A2A44]">Posiciones</h4>
-            <p className="text-[10px] text-slate-450 mt-0.5">Cálculo en vivo de la tabla</p>
-          </div>
-        </Link>
+        {hayFixture && (
+          <FixtureEditable
+            competitionId={id}
+            partidos={partidosUI}
+            canchas={(canchas ?? []).map((c) => ({ id: c.id, nombre: c.name }))}
+            arbitros={(arbitros ?? []).map((a) => ({ id: a.id, nombre: a.full_name }))}
+          />
+        )}
+      </section>
 
-        <Link href={`/admin/competencias/${compId}/planillas`} className="bg-white border p-5 rounded-2xl flex flex-col justify-between hover:border-[#F97316] transition shadow-sm h-32">
-          <Users className="w-6 h-6 text-[#1A2A44]" />
-          <div>
-            <h4 className="font-serif font-bold text-sm text-[#1A2A44]">Planillas de Partido</h4>
-            <p className="text-[10px] text-slate-450 mt-0.5">Carga y firmas de mesa</p>
-          </div>
-        </Link>
-      </div>
+      {/* Tabla de posiciones */}
+      <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+        <h2 className="font-serif text-base font-black text-[#1A2A44] flex items-center gap-2">
+          <ListOrdered className="w-4 h-4 text-[#F97316]" />
+          Tabla de posiciones
+        </h2>
+        <TablaPosiciones filas={filasConNombre} vallaId={valla?.teamId ?? null} />
+        <p className="text-[10px] text-slate-400">
+          Se actualiza sola con los resultados confirmados · Desempate:{" "}
+          {torneo.tiebreaker === "enfrentamiento_directo" ? "enfrentamiento directo" : "diferencia de gol"}
+        </p>
+      </section>
     </div>
   );
 }
