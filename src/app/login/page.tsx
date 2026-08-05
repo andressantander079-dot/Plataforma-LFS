@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogIn, ShieldAlert, Sparkles } from "lucide-react";
+import { createLfsClient } from "@/lib/infrastructure/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,23 +12,60 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    // Simulación de ruteo según correo
-    setTimeout(() => {
-      setLoading(false);
-      const emailLower = email.toLowerCase();
-      if (emailLower.includes("admin")) {
-        router.push("/admin/dashboard");
-      } else if (emailLower.includes("arbitro")) {
-        router.push("/arbitro/dashboard");
-      } else {
-        router.push("/club/dashboard");
+    try {
+      const supabase = createLfsClient();
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        setError(signInError.message || "Credenciales inválidas.");
+        setLoading(false);
+        return;
       }
-    }, 1000);
+
+      if (!data.user) {
+        setError("Error en el inicio de sesión. Inténtalo de nuevo.");
+        setLoading(false);
+        return;
+      }
+
+      // Obtener el rol del perfil del usuario
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        setError("No tienes un perfil registrado o careces de permisos.");
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
+
+      const role = profile.role;
+      if (role === "admin") {
+        router.push("/admin/dashboard");
+      } else if (role === "arbitro" || role === "arbitro_asistente") {
+        router.push("/arbitro/dashboard");
+      } else if (role === "club") {
+        router.push("/club/dashboard");
+      } else {
+        setError("Rol no reconocido en la plataforma.");
+        await supabase.auth.signOut();
+      }
+    } catch (err: any) {
+      setError(err?.message || "Ocurrió un error inesperado.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
