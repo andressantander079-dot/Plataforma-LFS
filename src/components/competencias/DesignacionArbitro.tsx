@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Calendar, MapPin, Loader2, AlertCircle, Check, Clock } from "lucide-react";
+import Link from "next/link";
+import { Calendar, MapPin, Loader2, AlertCircle, Check, Clock, ClipboardList } from "lucide-react";
 import { cargarResultadoArbitro } from "@/lib/actions/competencias.actions";
 
 /**
@@ -82,8 +83,8 @@ export function DesignacionArbitro({ partido }: { partido: DesignacionUI }) {
         </span>
       </div>
 
-      {!yaJugado && (
-        <div>
+      <div className="flex flex-wrap items-center gap-2">
+        {!yaJugado && (
           <button
             type="button"
             onClick={() => setAbierto(!abierto)}
@@ -91,8 +92,14 @@ export function DesignacionArbitro({ partido }: { partido: DesignacionUI }) {
           >
             {abierto ? "Cancelar" : "Cargar resultado"}
           </button>
-        </div>
-      )}
+        )}
+        <Link
+          href={`/arbitro/planillas/${partido.id}`}
+          className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-[#1A2A44] text-[#1A2A44] hover:bg-[#1A2A44] hover:text-white transition"
+        >
+          <ClipboardList className="w-3.5 h-3.5" /> Planilla
+        </Link>
+      </div>
 
       {abierto && !yaJugado && (
         <form

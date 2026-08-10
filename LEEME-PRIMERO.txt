@@ -1,0 +1,84 @@
+=============================================================
+PLATAFORMA LFS — PASO 7A: PLANILLA DIGITAL
+=============================================================
+
+Qué trae este paquete:
+- Botón "Gestionar Plantel" en cada partido del panel del club.
+- Convocatoria con la regla de categorías de la liga:
+  un jugador más chico PUEDE jugar en una categoría más grande,
+  pero uno más grande NUNCA puede jugar en una más chica.
+- Cada club confirma su propia convocatoria. Cuando los DOS
+  clubes confirmaron, la planilla pasa a manos del árbitro.
+- El árbitro puede hacer bajas/altas de último momento y cargar
+  los eventos del partido (goles, tarjetas, cambios) por jugador.
+- La federación aprueba la planilla y recién ahí el club puede
+  verla y descargarla (botón imprimir / guardar como PDF).
+
+-------------------------------------------------------------
+PASO 1 — BASE DE DATOS (se hace UNA sola vez)
+-------------------------------------------------------------
+1. Entrá a Supabase → tu proyecto → SQL Editor → New query.
+2. Abrí el archivo supabase_paso7a_planillas.sql con el Bloc
+   de notas, copiá TODO el contenido y pegalo.
+3. Apretá Run.
+4. Si dice "Success" listo. Si dice "already exists", significa
+   que ya lo habías corrido antes: no pasa nada, seguí.
+
+-------------------------------------------------------------
+PASO 2 — EXTRAER EL ZIP
+-------------------------------------------------------------
+En PowerShell (pegá este comando tal cual):
+
+Expand-Archive -LiteralPath "C:\Users\rocio\Descargas\Plataforma LFS - Paso 7A - Planilla Digital.zip" -DestinationPath "C:\LFS-fix" -Force
+
+(Si el ZIP está en otra carpeta, cambiá la ruta.)
+
+-------------------------------------------------------------
+PASO 3 — BORRAR LA PLANILLA VIEJA DE DEMOSTRACIÓN (IMPORTANTE)
+-------------------------------------------------------------
+La carpeta vieja src\app\arbitro\planillas\[id] era una demo con
+datos falsos y CHOCA con la planilla nueva: si no la borrás,
+npm run dev falla con un error de "different slug names".
+
+En PowerShell, parado en la carpeta del proyecto:
+
+cd "C:\Users\rocio\OneDrive\Escritorio\Andres\Plataforma LFS"
+Remove-Item -Recurse -Force -LiteralPath "src\app\arbitro\planillas\[id]"
+
+-------------------------------------------------------------
+PASO 4 — COPIAR LOS ARCHIVOS NUEVOS
+-------------------------------------------------------------
+En la misma PowerShell:
+
+robocopy "C:\LFS-fix" "C:\Users\rocio\OneDrive\Escritorio\Andres\Plataforma LFS" /E
+
+Tiene que decir Copiado: 16 (15 archivos + este LEEME).
+Los "EXTRA" que aparezcan son informativos, no son error.
+
+-------------------------------------------------------------
+PASO 5 — LEVANTAR LA PLATAFORMA
+-------------------------------------------------------------
+npm run dev
+
+-------------------------------------------------------------
+CÓMO PROBARLO (recorrido completo)
+-------------------------------------------------------------
+1. Entrá como ADMIN y creá un torneo con equipos, generá el
+   fixture y programá un partido con cancha y árbitro.
+2. Entrá como CLUB → Partidos → en "Próximos partidos" apretá
+   el botón naranja "Gestionar Plantel".
+3. Convocá jugadores (fijate que solo aparezcan los que cumplen
+   la regla de categorías), marcá titulares con la estrella y
+   apretá "Confirmar convocatoria".
+4. Hacé lo mismo con el OTRO club del partido.
+5. Entrá como ÁRBITRO → "Planillas de Partido": el partido tiene
+   que decir "Lista para editar". Abrila, hacé un alta o baja y
+   cargá goles/tarjetas/cambios con minuto.
+6. Entrá como ADMIN → Competencias → el torneo → en el partido
+   apretá el botón "Planilla" (ícono de lista) → "Aprobar planilla".
+7. Entrá como CLUB → Partidos → en "Resultados" el partido tiene
+   el botón de descarga. Ahí ves la planilla oficial y con el
+   botón "Imprimir / Guardar PDF" la descargás.
+
+Si algo falla, copiá el mensaje de error completo y mandamelo.
+=============================================================

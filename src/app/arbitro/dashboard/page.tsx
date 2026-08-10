@@ -15,7 +15,7 @@ export default function RefereeDashboard() {
 
   const modules = [
     { name: "Mis Designaciones", href: "/arbitro/designaciones", icon: Calendar, desc: "Aceptar designaciones y ver historial", badge: "1 Hoy" },
-    { name: "Carga de Planillas", href: "/arbitro/planillas", icon: Award, desc: "Cargar planillas táctiles y cierres QR", badge: "1 Pte" },
+    { name: "Planillas de Partido", href: "/arbitro/planillas", icon: Award, desc: "Editar planillas confirmadas y registrar eventos", badge: "Nuevo" },
     { name: "Mensajería", href: "/arbitro/mensajeria", icon: MessageSquare, desc: "Mensajería con Colegio de Árbitros", badge: "Sin leer" },
     { name: "Mi Perfil y Firma", href: "/arbitro/perfil", icon: User, desc: "Firma digital y datos personales", badge: "Activo" },
     { name: "Mis Estadísticas", href: "/arbitro/estadisticas", icon: BarChart3, desc: "Calificaciones de mesa y partidos dirigidos", badge: "Puntaje 9.2" },

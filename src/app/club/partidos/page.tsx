@@ -1,16 +1,19 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Trophy, Calendar, MapPin, ShieldCheck, AlertCircle, Shield } from "lucide-react";
+import { ArrowLeft, Trophy, Calendar, MapPin, ShieldCheck, AlertCircle, Shield, FileDown } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion";
 import { calcularTabla, vallaMenosVencida } from "@/lib/core/competencias/tabla";
 import { TablaPosiciones } from "@/components/competencias/TablaPosiciones";
+import { GestionPlantelClub } from "@/components/planilla/GestionPlantelClub";
+import { obtenerEstadosPlanilla } from "@/lib/actions/planilla.actions";
 
 /**
  * PARTIDOS DEL CLUB
  * Por cada torneo en que participa: métricas (PJ, GF, GC, DIF),
  * próximos partidos, resultados y tabla de posiciones.
- * La planilla oficial del partido llega en la fase 2.
+ * Paso 7A: botón "Gestionar Plantel" para convocar jugadores y
+ * descarga de la planilla oficial una vez aprobada por la federación.
  */
 
 function fechaLinda(iso: string | null): string {
@@ -178,6 +181,9 @@ export default async function ClubPartidos() {
               .slice(-6)
               .reverse();
 
+            // Estado de planilla de cada partido (botón Gestionar Plantel / descarga)
+            const estadosPlanilla = await obtenerEstadosPlanilla(mios.map((p) => p.id));
+
             const categoria = (torneo.categories as unknown as { name: string } | null)?.name ?? "";
 
             return (
@@ -246,25 +252,40 @@ export default async function ClubPartidos() {
                     <p className="text-xs text-slate-400 px-4 py-4">No hay partidos programados.</p>
                   )}
                   <ul className="divide-y divide-slate-100">
-                    {proximos.map((p) => (
-                      <li key={p.id} className="px-4 py-3 flex flex-col gap-1">
-                        <p className="text-sm font-bold text-[#1A2A44]">
-                          {nombreEquipo.get(p.home_team_id)} vs {nombreEquipo.get(p.away_team_id)}
-                          {p.matchday !== null && (
-                            <span className="text-[10px] font-bold text-slate-400"> · Fecha {p.matchday}</span>
-                          )}
-                        </p>
-                        <p className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" /> {fechaLinda(p.scheduled_at)}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />{" "}
-                            {p.venue_id ? (nombreCancha.get(p.venue_id) ?? "A definir") : "A definir"}
-                          </span>
-                        </p>
-                      </li>
-                    ))}
+                    {proximos.map((p) => {
+                      const miTeamId = misEquiposTorneo.includes(p.home_team_id)
+                        ? p.home_team_id
+                        : p.away_team_id;
+                      const rivalId = miTeamId === p.home_team_id ? p.away_team_id : p.home_team_id;
+                      return (
+                        <li key={p.id} className="px-4 py-3 flex flex-col gap-1.5">
+                          <p className="text-sm font-bold text-[#1A2A44]">
+                            {nombreEquipo.get(p.home_team_id)} vs {nombreEquipo.get(p.away_team_id)}
+                            {p.matchday !== null && (
+                              <span className="text-[10px] font-bold text-slate-400"> · Fecha {p.matchday}</span>
+                            )}
+                          </p>
+                          <p className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3" /> {fechaLinda(p.scheduled_at)}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />{" "}
+                              {p.venue_id ? (nombreCancha.get(p.venue_id) ?? "A definir") : "A definir"}
+                            </span>
+                          </p>
+                          <div>
+                            <GestionPlantelClub
+                              matchId={p.id}
+                              teamId={miTeamId}
+                              equipoNombre={nombreEquipo.get(miTeamId) ?? "Mi equipo"}
+                              rivalNombre={nombreEquipo.get(rivalId) ?? "Rival"}
+                              estado={estadosPlanilla[p.id]}
+                            />
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
 
@@ -290,6 +311,14 @@ export default async function ClubPartidos() {
                             <span className="text-[9px] font-bold text-orange-600 flex items-center gap-0.5 shrink-0">
                               <AlertCircle className="w-3 h-3" /> A confirmar
                             </span>
+                          )}
+                          {estadosPlanilla[p.id]?.status === "aprobada" && (
+                            <Link
+                              href={`/club/partidos/${p.id}`}
+                              className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg px-2 py-1 transition-colors"
+                            >
+                              <FileDown className="w-3 h-3" /> Planilla
+                            </Link>
                           )}
                         </li>
                       ))}

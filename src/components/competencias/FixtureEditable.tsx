@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import {
   Calendar,
   MapPin,
@@ -11,6 +12,7 @@ import {
   Loader2,
   AlertCircle,
   Trophy,
+  ClipboardList,
 } from "lucide-react";
 import {
   actualizarPartido,
@@ -209,6 +211,13 @@ export function FixtureEditable({ competitionId, partidos, canchas, arbitros }: 
                       Confirmar
                     </button>
                   )}
+
+                  <Link
+                    href={`/admin/planillas/${p.id}`}
+                    className="text-[11px] font-bold px-3 py-1.5 rounded-lg border border-slate-300 text-[#1A2A44] hover:border-[#F97316] hover:text-[#F97316] transition flex items-center gap-1"
+                  >
+                    <ClipboardList className="w-3 h-3" /> Planilla
+                  </Link>
 
                   {p.status === "programado" && (
                     <>
