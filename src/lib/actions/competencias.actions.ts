@@ -32,8 +32,42 @@ function revalidarCompetencias(competitionId?: string) {
   if (competitionId) revalidatePath(`/admin/competencias/${competitionId}`);
   revalidatePath("/fixture");
   revalidatePath("/posiciones");
+  revalidatePath("/estadisticas");
   revalidatePath("/club/partidos");
   revalidatePath("/arbitro/designaciones");
+}
+
+/**
+ * DISCIPLINA AUTOMÁTICA (Paso 7B)
+ * Cuando un partido queda confirmado (resultado o W.O.), los jugadores
+ * suspendidos de esos dos equipos descuentan UNA fecha de su sanción.
+ * Solo se descuenta en la transición a confirmado (si el admin corrige
+ * el marcador después, no vuelve a descontar).
+ */
+async function descontarSuspensionesDelPartido(
+  supabase: Awaited<ReturnType<typeof createLfsServerClient>>,
+  partidoId: string
+) {
+  const { data: partido } = await supabase
+    .from("matches")
+    .select("competition_id, home_team_id, away_team_id")
+    .eq("id", partidoId)
+    .single();
+  if (!partido) return;
+
+  const { data: activas } = await supabase
+    .from("player_suspensions")
+    .select("id, partidos_pendientes")
+    .eq("competition_id", partido.competition_id)
+    .in("team_id", [partido.home_team_id, partido.away_team_id])
+    .gt("partidos_pendientes", 0);
+
+  for (const s of activas ?? []) {
+    await supabase
+      .from("player_suspensions")
+      .update({ partidos_pendientes: s.partidos_pendientes - 1 })
+      .eq("id", s.id);
+  }
 }
 
 // ============================================================================
@@ -454,6 +488,13 @@ export async function cargarResultadoAdmin(partidoId: string, formData: FormData
     return { error: "Los goles deben ser números enteros entre 0 y 99." };
   }
 
+  // estado previo: solo se descuentan suspensiones al pasar a confirmado
+  const { data: previo } = await supabase
+    .from("matches")
+    .select("result_confirmed")
+    .eq("id", partidoId)
+    .single();
+
   const { error } = await supabase
     .from("matches")
     .update({
@@ -466,6 +507,10 @@ export async function cargarResultadoAdmin(partidoId: string, formData: FormData
 
   if (error) return { error: "No se pudo cargar el resultado." };
 
+  if (!previo?.result_confirmed) {
+    await descontarSuspensionesDelPartido(supabase, partidoId);
+  }
+
   revalidarCompetencias(competitionId);
   return { ok: true };
 }
@@ -474,12 +519,22 @@ export async function cargarResultadoAdmin(partidoId: string, formData: FormData
 export async function confirmarResultado(partidoId: string, competitionId: string) {
   const { supabase } = await requireAdmin();
 
+  const { data: previo } = await supabase
+    .from("matches")
+    .select("result_confirmed")
+    .eq("id", partidoId)
+    .single();
+
   const { error } = await supabase
     .from("matches")
     .update({ result_confirmed: true })
     .eq("id", partidoId);
 
   if (error) return { error: "No se pudo confirmar el resultado." };
+
+  if (!previo?.result_confirmed) {
+    await descontarSuspensionesDelPartido(supabase, partidoId);
+  }
 
   revalidarCompetencias(competitionId);
   return { ok: true };
@@ -496,6 +551,12 @@ export async function marcarWO(partidoId: string, competitionId: string, ganador
     .single();
   if (!torneo) return { error: "El torneo no existe." };
 
+  const { data: previo } = await supabase
+    .from("matches")
+    .select("result_confirmed")
+    .eq("id", partidoId)
+    .single();
+
   const homeScore = ganador === "home" ? torneo.wo_home_goals : torneo.wo_away_goals;
   const awayScore = ganador === "away" ? torneo.wo_home_goals : torneo.wo_away_goals;
 
@@ -510,6 +571,10 @@ export async function marcarWO(partidoId: string, competitionId: string, ganador
     .eq("id", partidoId);
 
   if (error) return { error: "No se pudo marcar el W.O." };
+
+  if (!previo?.result_confirmed) {
+    await descontarSuspensionesDelPartido(supabase, partidoId);
+  }
 
   revalidarCompetencias(competitionId);
   return { ok: true };

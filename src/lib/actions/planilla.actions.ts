@@ -9,6 +9,10 @@ import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
  * (los más chicos pueden jugar en categorías más grandes, nunca al revés),
  * edición por el árbitro, aprobación de la federación y eventos del
  * partido (goles, tarjetas y cambios) por jugador.
+ *
+ * Paso 7B: disciplina automática. Las rojas y la acumulación de amarillas
+ * (regla del torneo) generan suspensiones que bloquean la convocatoria
+ * del jugador hasta cumplir las fechas.
  */
 
 // ---------- Tipos compartidos ----------
@@ -18,6 +22,7 @@ export interface Convocable {
   nombre: string;
   dni: string;
   categoria: string; // categoría en la que está registrado dentro del club
+  suspendido: string | null; // motivo legible si tiene suspensión activa
 }
 
 export interface Convocado {
@@ -145,6 +150,36 @@ function revalidarPlanillas(matchId: string) {
   revalidatePath(`/arbitro/planillas/${matchId}`);
   revalidatePath(`/admin/planillas/${matchId}`);
   revalidatePath("/arbitro/designaciones");
+  revalidatePath("/estadisticas");
+}
+
+/** Motivo de suspensión en texto legible. */
+function textoMotivoSuspension(motivo: string, pendientes: number): string {
+  const base =
+    motivo === "roja" ? "Tarjeta roja" : "Acumulación de amarillas";
+  return `${base} · le queda${pendientes > 1 ? "n" : ""} ${pendientes} fecha${pendientes > 1 ? "s" : ""}`;
+}
+
+/**
+ * Devuelve el motivo si el jugador tiene una suspensión activa en el
+ * torneo (le quedan fechas por cumplir), o null si puede jugar.
+ */
+async function motivoSuspensionActiva(
+  supabase: Supabase,
+  competitionId: string,
+  playerId: string
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("player_suspensions")
+    .select("motivo, partidos_pendientes")
+    .eq("competition_id", competitionId)
+    .eq("player_id", playerId)
+    .gt("partidos_pendientes", 0)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return textoMotivoSuspension(data.motivo, data.partidos_pendientes);
 }
 
 /**
@@ -336,7 +371,7 @@ export async function obtenerConvocables(
 
   const { data: match } = await supabase
     .from("matches")
-    .select("referee_id")
+    .select("referee_id, competition_id")
     .eq("id", matchId)
     .single();
 
@@ -383,9 +418,27 @@ export async function obtenerConvocables(
         dni: p.dni,
         categoria: c.name,
         nivel: c.level_hierarchy,
+        suspendido: null,
       });
     }
   });
+
+  // Disciplina automática (Paso 7B): marcar a los suspendidos del torneo
+  const playerIds = [...porJugador.keys()];
+  if (match?.competition_id && playerIds.length > 0) {
+    const { data: suspensiones } = await supabase
+      .from("player_suspensions")
+      .select("player_id, motivo, partidos_pendientes")
+      .eq("competition_id", match.competition_id)
+      .in("player_id", playerIds)
+      .gt("partidos_pendientes", 0);
+    (suspensiones ?? []).forEach((s) => {
+      const entrada = porJugador.get(s.player_id);
+      if (entrada) {
+        entrada.suspendido = textoMotivoSuspension(s.motivo, s.partidos_pendientes);
+      }
+    });
+  }
 
   const convocables = [...porJugador.values()]
     .map(({ nivel: _nivel, ...resto }) => resto)
@@ -476,6 +529,17 @@ export async function convocarJugador(
   // Regla de categorías (validación del lado del servidor)
   const regla = await cumpleReglaCategorias(supabase, teamId, playerId);
   if (!regla.ok) return { error: regla.error };
+
+  // Disciplina automática: un suspendido no se puede convocar
+  const { data: partido } = await supabase
+    .from("matches")
+    .select("competition_id")
+    .eq("id", matchId)
+    .single();
+  if (partido?.competition_id) {
+    const suspendido = await motivoSuspensionActiva(supabase, partido.competition_id, playerId);
+    if (suspendido) return { error: `No se puede convocar: el jugador está suspendido (${suspendido}).` };
+  }
 
   const sheet = await obtenerOCrearPlanilla(supabase, matchId);
   if (!esAdmin) {
@@ -674,7 +738,7 @@ export async function arbitroAgregarJugador(
 
   const { data: match } = await supabase
     .from("matches")
-    .select("referee_id")
+    .select("referee_id, competition_id")
     .eq("id", matchId)
     .single();
   const esAdmin = role === "admin";
@@ -689,6 +753,12 @@ export async function arbitroAgregarJugador(
 
   const regla = await cumpleReglaCategorias(supabase, teamId, playerId);
   if (!regla.ok) return { error: regla.error };
+
+  // Disciplina automática: el árbitro tampoco puede agregar suspendidos
+  if (match?.competition_id) {
+    const suspendido = await motivoSuspensionActiva(supabase, match.competition_id, playerId);
+    if (suspendido) return { error: `No se puede agregar: el jugador está suspendido (${suspendido}).` };
+  }
 
   const { error } = await supabase.from("match_sheet_players").insert({
     sheet_id: sheet.id,
@@ -778,7 +848,7 @@ export async function registrarEvento(formData: FormData): Promise<{ ok?: boolea
 
   const { data: match } = await supabase
     .from("matches")
-    .select("referee_id, home_team_id, away_team_id")
+    .select("referee_id, home_team_id, away_team_id, competition_id")
     .eq("id", matchId)
     .single();
   const esAdmin = role === "admin";
@@ -822,15 +892,19 @@ export async function registrarEvento(formData: FormData): Promise<{ ok?: boolea
     }
   }
 
-  const { error } = await supabase.from("match_events").insert({
-    match_id: matchId,
-    team_id: teamId,
-    player_id: playerId,
-    jugador_relacionado_id: tipo === "cambio" ? relacionadoId : null,
-    tipo,
-    minuto,
-    created_by: user.id,
-  });
+  const { data: eventoInsertado, error } = await supabase
+    .from("match_events")
+    .insert({
+      match_id: matchId,
+      team_id: teamId,
+      player_id: playerId,
+      jugador_relacionado_id: tipo === "cambio" ? relacionadoId : null,
+      tipo,
+      minuto,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
   if (error) return { error: "No se pudo registrar el evento." };
 
   // en un cambio, el que entra pasa a titular y el que sale deja de serlo
@@ -847,7 +921,55 @@ export async function registrarEvento(formData: FormData): Promise<{ ok?: boolea
       .eq("player_id", relacionadoId);
   }
 
+  // ---------------------------------------------------------------
+  // DISCIPLINA AUTOMÁTICA (Paso 7B)
+  // roja directa → 1 fecha; N amarillas en el torneo → 1 fecha
+  // ---------------------------------------------------------------
+  if (match?.competition_id && (tipo === "roja" || tipo === "amarilla")) {
+    let generaSuspension = false;
+    let motivo: "roja" | "acumulacion_amarillas" = "roja";
+
+    if (tipo === "roja") {
+      generaSuspension = true;
+    } else {
+      const { data: torneo } = await supabase
+        .from("competitions")
+        .select("yellow_cards_suspension")
+        .eq("id", match.competition_id)
+        .single();
+      const limite = Math.max(1, torneo?.yellow_cards_suspension ?? 5);
+
+      const { data: amarillas } = await supabase
+        .from("match_events")
+        .select("id, matches!inner(competition_id)")
+        .eq("player_id", playerId)
+        .eq("tipo", "amarilla")
+        .eq("matches.competition_id", match.competition_id);
+      const total = (amarillas ?? []).length;
+      if (total > 0 && total % limite === 0) {
+        generaSuspension = true;
+        motivo = "acumulacion_amarillas";
+      }
+    }
+
+    if (generaSuspension && eventoInsertado) {
+      // si falla el alta de la suspensión no frenamos el evento:
+      // el índice único por evento evita duplicados en reintentos
+      await supabase.from("player_suspensions").insert({
+        player_id: playerId,
+        competition_id: match.competition_id,
+        team_id: teamId,
+        motivo,
+        partidos_pendientes: 1,
+        evento_origen_id: eventoInsertado.id,
+      });
+    }
+  }
+
   revalidarPlanillas(matchId);
+  if (match?.competition_id) {
+    revalidatePath(`/admin/competencias/${match.competition_id}`);
+  }
   return { ok: true };
 }
 
@@ -875,6 +997,12 @@ export async function eliminarEvento(
 
   const { error } = await supabase.from("match_events").delete().eq("id", eventoId);
   if (error) return { error: "No se pudo borrar el evento." };
+
+  // si el evento había generado una suspensión automática, se limpia también
+  await supabase
+    .from("player_suspensions")
+    .delete()
+    .eq("evento_origen_id", eventoId);
 
   revalidarPlanillas(evento.match_id);
   return { ok: true };

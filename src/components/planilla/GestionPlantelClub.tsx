@@ -14,6 +14,7 @@ import {
   FileDown,
   Star,
   ShieldCheck,
+  Ban,
 } from "lucide-react";
 import {
   obtenerConvocables,
@@ -160,12 +161,15 @@ function PanelConvocatoria({
 
   const misConvocados = (planilla?.convocados ?? []).filter((c) => c.teamId === teamId);
   const idsConvocados = new Set(misConvocados.map((c) => c.playerId));
+  const filtroBusqueda = (c: Convocable) =>
+    busqueda.trim() === "" ||
+    c.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+    c.dni.includes(busqueda.trim());
   const disponibles = convocables.filter(
-    (c) =>
-      !idsConvocados.has(c.playerId) &&
-      (busqueda.trim() === "" ||
-        c.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.dni.includes(busqueda.trim()))
+    (c) => !idsConvocados.has(c.playerId) && !c.suspendido && filtroBusqueda(c)
+  );
+  const suspendidos = convocables.filter(
+    (c) => !idsConvocados.has(c.playerId) && c.suspendido && filtroBusqueda(c)
   );
 
   return (
@@ -304,6 +308,26 @@ function PanelConvocatoria({
                     </p>
                   )}
                 </ul>
+
+                {/* Suspendidos: se muestran bloqueados para que el club entienda por qué */}
+                {suspendidos.length > 0 && (
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-red-600 mb-1.5 flex items-center gap-1">
+                      <Ban className="w-3 h-3" /> Suspendidos — no se pueden convocar
+                    </p>
+                    <ul className="flex flex-col gap-1.5">
+                      {suspendidos.map((c) => (
+                        <li
+                          key={c.playerId}
+                          className="bg-red-50/60 border border-red-100 rounded-xl px-3 py-2 opacity-80"
+                        >
+                          <p className="text-sm font-bold text-slate-500 truncate">{c.nombre}</p>
+                          <p className="text-[10px] text-red-600 font-semibold">{c.suspendido}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </section>
             </div>
 

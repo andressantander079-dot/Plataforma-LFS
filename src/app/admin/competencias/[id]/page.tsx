@@ -1,6 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Trophy, Users, CalendarRange, ListOrdered } from "lucide-react";
+import { ArrowLeft, Trophy, Users, CalendarRange, ListOrdered, Ban } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { calcularTabla, vallaMenosVencida } from "@/lib/core/competencias/tabla";
 import { cantidadFechas, cantidadPartidos } from "@/lib/core/competencias/fixture";
@@ -47,6 +47,7 @@ export default async function DetalleTorneo({
     { data: canchas },
     { data: arbitros },
     { data: clubes },
+    { data: suspensionesRaw },
   ] = await Promise.all([
     supabase
       .from("competition_teams")
@@ -62,6 +63,13 @@ export default async function DetalleTorneo({
     supabase.from("venues").select("id, name").order("name"),
     supabase.from("profiles").select("id, full_name").eq("role", "arbitro").order("full_name"),
     supabase.from("clubs").select("id, name").eq("status", "habilitado").order("name"),
+    // Disciplina automática (Paso 7B): suspensiones activas del torneo
+    supabase
+      .from("player_suspensions")
+      .select("id, motivo, partidos_pendientes, players(first_name, last_name), teams(name)")
+      .eq("competition_id", id)
+      .gt("partidos_pendientes", 0)
+      .order("created_at", { ascending: false }),
   ]);
 
   const equipos = (inscripciones ?? []).map((i) => {
@@ -200,6 +208,47 @@ export default async function DetalleTorneo({
           Se actualiza sola con los resultados confirmados · Desempate:{" "}
           {torneo.tiebreaker === "enfrentamiento_directo" ? "enfrentamiento directo" : "diferencia de gol"}
         </p>
+      </section>
+
+      {/* Disciplina automática: suspensiones activas del torneo */}
+      <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+        <h2 className="font-serif text-base font-black text-[#1A2A44] flex items-center gap-2">
+          <Ban className="w-4 h-4 text-red-600" />
+          Suspensiones activas ({(suspensionesRaw ?? []).length})
+        </h2>
+        <p className="text-[10px] text-slate-400 -mt-2">
+          Se generan solas: roja directa o {torneo.yellow_cards_suspension} amarillas en el torneo = 1 fecha.
+          Se descuentan solas cuando juega el equipo. El jugador no se puede convocar mientras tanto.
+        </p>
+
+        {(suspensionesRaw ?? []).length === 0 ? (
+          <p className="text-xs text-slate-400 py-2">No hay jugadores suspendidos en este torneo.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {(suspensionesRaw ?? []).map((s) => {
+              const jugador = s.players as unknown as { first_name: string; last_name: string } | null;
+              const equipo = s.teams as unknown as { name: string } | null;
+              return (
+                <li
+                  key={s.id}
+                  className="border border-red-100 bg-red-50/50 rounded-xl px-3 py-2 flex items-center gap-3"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-[#1A2A44] text-sm truncate">
+                      {jugador ? `${jugador.last_name}, ${jugador.first_name}` : "—"}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      {equipo?.name ?? "—"} · {s.motivo === "roja" ? "Tarjeta roja" : "Acumulación de amarillas"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[10px] font-black text-red-700 bg-red-100 rounded-full px-2.5 py-1">
+                    {s.partidos_pendientes} fecha{s.partidos_pendientes > 1 ? "s" : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
     </div>
   );

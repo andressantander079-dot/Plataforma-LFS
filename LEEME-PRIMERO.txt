@@ -1,84 +1,72 @@
 =============================================================
-PLATAFORMA LFS — PASO 7A: PLANILLA DIGITAL
+PLATAFORMA LFS — PASO 7B: GOLEADORES Y DISCIPLINA AUTOMÁTICA
 =============================================================
 
 Qué trae este paquete:
-- Botón "Gestionar Plantel" en cada partido del panel del club.
-- Convocatoria con la regla de categorías de la liga:
-  un jugador más chico PUEDE jugar en una categoría más grande,
-  pero uno más grande NUNCA puede jugar en una más chica.
-- Cada club confirma su propia convocatoria. Cuando los DOS
-  clubes confirmaron, la planilla pasa a manos del árbitro.
-- El árbitro puede hacer bajas/altas de último momento y cargar
-  los eventos del partido (goles, tarjetas, cambios) por jugador.
-- La federación aprueba la planilla y recién ahí el club puede
-  verla y descargarla (botón imprimir / guardar como PDF).
+- La página pública /estadisticas deja de ser de mentira: ahora
+  muestra la TABLA DE GOLEADORES, las TARJETAS y las SUSPENSIONES
+  ACTIVAS de cada torneo, calculadas solas desde los eventos que
+  carga el árbitro en la planilla digital (Paso 7A).
+- DISCIPLINA AUTOMÁTICA:
+  · Roja directa → 1 fecha de suspensión.
+  · N amarillas en el mismo torneo → 1 fecha (N se define al crear
+    el torneo, por defecto 5).
+  · El jugador suspendido NO se puede convocar: aparece bloqueado
+    en "Gestionar Plantel" y en la planilla del árbitro.
+  · La fecha se descuenta SOLA cuando el equipo juega su siguiente
+    partido (resultado confirmado o W.O.).
+  · La federación ve las suspensiones activas dentro de cada torneo.
 
 -------------------------------------------------------------
 PASO 1 — BASE DE DATOS (se hace UNA sola vez)
 -------------------------------------------------------------
 1. Entrá a Supabase → tu proyecto → SQL Editor → New query.
-2. Abrí el archivo supabase_paso7a_planillas.sql con el Bloc
-   de notas, copiá TODO el contenido y pegalo.
-3. Apretá Run.
-4. Si dice "Success" listo. Si dice "already exists", significa
-   que ya lo habías corrido antes: no pasa nada, seguí.
+2. Abrí supabase_paso7b_disciplina.sql con el Bloc de notas,
+   copiá TODO y pegalo → Run.
+3. Si dice "Success" listo. Si dice "already exists", ya estaba.
 
 -------------------------------------------------------------
 PASO 2 — EXTRAER EL ZIP
 -------------------------------------------------------------
-En PowerShell (pegá este comando tal cual):
+En PowerShell:
 
-Expand-Archive -LiteralPath "C:\Users\rocio\Descargas\Plataforma LFS - Paso 7A - Planilla Digital.zip" -DestinationPath "C:\LFS-fix" -Force
-
-(Si el ZIP está en otra carpeta, cambiá la ruta.)
+Expand-Archive -LiteralPath "C:\Users\rocio\Descargas\Plataforma LFS - Paso 7B - Goleadores y Disciplina.zip" -DestinationPath "C:\LFS-fix" -Force
 
 -------------------------------------------------------------
-PASO 3 — BORRAR LA PLANILLA VIEJA DE DEMOSTRACIÓN (IMPORTANTE)
+PASO 3 — COPIAR AL PROYECTO
 -------------------------------------------------------------
-La carpeta vieja src\app\arbitro\planillas\[id] era una demo con
-datos falsos y CHOCA con la planilla nueva: si no la borrás,
-npm run dev falla con un error de "different slug names".
-
-En PowerShell, parado en la carpeta del proyecto:
-
 cd "C:\Users\rocio\OneDrive\Escritorio\Andres\Plataforma LFS"
-Remove-Item -Recurse -Force -LiteralPath "src\app\arbitro\planillas\[id]"
-
--------------------------------------------------------------
-PASO 4 — COPIAR LOS ARCHIVOS NUEVOS
--------------------------------------------------------------
-En la misma PowerShell:
-
 robocopy "C:\LFS-fix" "C:\Users\rocio\OneDrive\Escritorio\Andres\Plataforma LFS" /E
 
-Tiene que decir Copiado: 16 (15 archivos + este LEEME).
-Los "EXTRA" que aparezcan son informativos, no son error.
+Tiene que decir Copiado: 8. Los "EXTRA" son informativos.
+(Este paso NO borra nada; la carpeta [id] vieja ya la borramos
+en el Paso 7A.)
 
 -------------------------------------------------------------
-PASO 5 — LEVANTAR LA PLATAFORMA
+PASO 4 — LEVANTAR
 -------------------------------------------------------------
 npm run dev
 
 -------------------------------------------------------------
-CÓMO PROBARLO (recorrido completo)
+CÓMO PROBARLO
 -------------------------------------------------------------
-1. Entrá como ADMIN y creá un torneo con equipos, generá el
-   fixture y programá un partido con cancha y árbitro.
-2. Entrá como CLUB → Partidos → en "Próximos partidos" apretá
-   el botón naranja "Gestionar Plantel".
-3. Convocá jugadores (fijate que solo aparezcan los que cumplen
-   la regla de categorías), marcá titulares con la estrella y
-   apretá "Confirmar convocatoria".
-4. Hacé lo mismo con el OTRO club del partido.
-5. Entrá como ÁRBITRO → "Planillas de Partido": el partido tiene
-   que decir "Lista para editar". Abrila, hacé un alta o baja y
-   cargá goles/tarjetas/cambios con minuto.
-6. Entrá como ADMIN → Competencias → el torneo → en el partido
-   apretá el botón "Planilla" (ícono de lista) → "Aprobar planilla".
-7. Entrá como CLUB → Partidos → en "Resultados" el partido tiene
-   el botón de descarga. Ahí ves la planilla oficial y con el
-   botón "Imprimir / Guardar PDF" la descargás.
+Prueba rápida de la suspensión (la más importante):
+1. ÁRBITRO: abrí la planilla confirmada de un partido y cargale
+   una ROJA a un jugador (o varias amarillas al mismo).
+2. CLUB: entrá a Partidos → "Gestionar Plantel" del SIGUIENTE
+   partido de ese equipo → ese jugador aparece abajo de todo en
+   rojo: "Suspendido — no se puede convocar" (con el motivo).
+3. ADMIN: Competencias → tu torneo → abajo de la tabla de
+   posiciones aparece "Suspensiones activas".
+4. ADMIN: cargá/confirmá el resultado de ese partido (sin el
+   suspendido) → la suspensión se descuenta sola → el jugador
+   vuelve a estar disponible para la fecha siguiente.
+5. PÚBLICO: abrí http://localhost:3000/estadisticas (sin login)
+   → tabla de goleadores, tarjetas y suspensiones activas,
+   con selector de torneo arriba.
+
+Dato: para probar amarillas más rápido, creá un torneo de prueba
+con "Amarillas para suspensión" = 2 en el formulario del torneo.
 
 Si algo falla, copiá el mensaje de error completo y mandamelo.
 =============================================================

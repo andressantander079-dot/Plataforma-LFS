@@ -10,6 +10,7 @@ import {
   AlertCircle,
   CheckCircle2,
   PlusCircle,
+  Ban,
 } from "lucide-react";
 import {
   obtenerConvocables,
@@ -192,27 +193,37 @@ export function PlanillaArbitro({ planilla }: { planilla: PlanillaCompleta }) {
               {opcionesFiltradas.map((o) => (
                 <li
                   key={o.playerId}
-                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 flex items-center gap-2"
+                  className={`rounded-xl px-3 py-1.5 flex items-center gap-2 border ${
+                    o.suspendido
+                      ? "bg-red-50/60 border-red-100 opacity-80"
+                      : "bg-white border-slate-200"
+                  }`}
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-[#1A2A44] truncate">{o.nombre}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {o.categoria} · DNI {o.dni}
+                    <p className={`text-[10px] ${o.suspendido ? "text-red-600 font-semibold" : "text-slate-400"}`}>
+                      {o.suspendido ?? `${o.categoria} · DNI ${o.dni}`}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    disabled={pendiente}
-                    onClick={() =>
-                      ejecutar(
-                        () => arbitroAgregarJugador(planilla.matchId, teamId, o.playerId),
-                        "Jugador agregado a la planilla."
-                      )
-                    }
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#F97316] hover:bg-orange-50 rounded-lg px-2 py-1 transition-colors"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" /> Agregar
-                  </button>
+                  {o.suspendido ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 px-2 py-1">
+                      <Ban className="w-3.5 h-3.5" /> Suspendido
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={pendiente}
+                      onClick={() =>
+                        ejecutar(
+                          () => arbitroAgregarJugador(planilla.matchId, teamId, o.playerId),
+                          "Jugador agregado a la planilla."
+                        )
+                      }
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-[#F97316] hover:bg-orange-50 rounded-lg px-2 py-1 transition-colors"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" /> Agregar
+                    </button>
+                  )}
                 </li>
               ))}
               {opcionesFiltradas.length === 0 && (
