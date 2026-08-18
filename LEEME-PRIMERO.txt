@@ -1,36 +1,41 @@
 =============================================================
-PLATAFORMA LFS — PASO 7B: GOLEADORES Y DISCIPLINA AUTOMÁTICA
+PLATAFORMA LFS — HOTFIX DE SEGURIDAD (agosto 2026)
 =============================================================
 
-Qué trae este paquete:
-- La página pública /estadisticas deja de ser de mentira: ahora
-  muestra la TABLA DE GOLEADORES, las TARJETAS y las SUSPENSIONES
-  ACTIVAS de cada torneo, calculadas solas desde los eventos que
-  carga el árbitro en la planilla digital (Paso 7A).
-- DISCIPLINA AUTOMÁTICA:
-  · Roja directa → 1 fecha de suspensión.
-  · N amarillas en el mismo torneo → 1 fecha (N se define al crear
-    el torneo, por defecto 5).
-  · El jugador suspendido NO se puede convocar: aparece bloqueado
-    en "Gestionar Plantel" y en la planilla del árbitro.
-  · La fecha se descuenta SOLA cuando el equipo juega su siguiente
-    partido (resultado confirmado o W.O.).
-  · La federación ve las suspensiones activas dentro de cada torneo.
+Qué cierra este paquete (auditoría de seguridad):
+🔴 1. CLUBS: los DNI y teléfonos de presidentes/tesoreros eran
+   legibles por CUALQUIERA (lectura pública). Ahora solo los ve
+   la federación y el propio club.
+🔴 2. PLAYERS: una política bugueada permitía a cualquier usuario
+   logueado leer TODOS los jugadores con DNI. Ahora cada club solo
+   ve su plantel; el árbitro solo los clubes de su partido.
+🟠 3. RUTAS: /admin, /club y /arbitro no verificaban sesión. El
+   nuevo proxy redirige a /login a quien no tenga sesión, y a su
+   propio panel a quien tenga rol equivocado.
+🟠 4. AUDIT_LOGS: cualquiera podía escribir registros falsos.
+   Ahora solo la federación.
+🟡 5. TRANSFERS: políticas mínimas para el futuro módulo de pases.
 
 -------------------------------------------------------------
 PASO 1 — BASE DE DATOS (se hace UNA sola vez)
 -------------------------------------------------------------
-1. Entrá a Supabase → tu proyecto → SQL Editor → New query.
-2. Abrí supabase_paso7b_disciplina.sql con el Bloc de notas,
-   copiá TODO y pegalo → Run.
-3. Si dice "Success" listo. Si dice "already exists", ya estaba.
+1. Supabase → SQL Editor → New query.
+2. Pegá TODO el contenido de supabase_hotfix_seguridad.sql → Run.
+3. Tiene que decir "Success". (Es seguro correrlo más de una vez.)
+
+Verificación (pegá esto después y dale Run):
+  select tablename, count(*) from pg_policies
+  where tablename in ('clubs','players','player_categories',
+                      'audit_logs','transfers')
+  group by tablename order by tablename;
+Debe devolver 5 filas (una por tabla).
 
 -------------------------------------------------------------
 PASO 2 — EXTRAER EL ZIP
 -------------------------------------------------------------
 En PowerShell:
 
-Expand-Archive -LiteralPath "C:\Users\rocio\Descargas\Plataforma LFS - Paso 7B - Goleadores y Disciplina.zip" -DestinationPath "C:\LFS-fix" -Force
+Expand-Archive -LiteralPath "C:\Users\rocio\Descargas\Plataforma LFS - Hotfix Seguridad.zip" -DestinationPath "C:\LFS-fix" -Force
 
 -------------------------------------------------------------
 PASO 3 — COPIAR AL PROYECTO
@@ -38,35 +43,28 @@ PASO 3 — COPIAR AL PROYECTO
 cd "C:\Users\rocio\OneDrive\Escritorio\Andres\Plataforma LFS"
 robocopy "C:\LFS-fix" "C:\Users\rocio\OneDrive\Escritorio\Andres\Plataforma LFS" /E
 
-Tiene que decir Copiado: 8. Los "EXTRA" son informativos.
-(Este paso NO borra nada; la carpeta [id] vieja ya la borramos
-en el Paso 7A.)
+Tiene que decir Copiado: 3 (proxy.ts + el SQL + este LEEME).
 
 -------------------------------------------------------------
-PASO 4 — LEVANTAR
+PASO 4 — LEVANTAR Y PROBAR LA SEGURIDAD
 -------------------------------------------------------------
 npm run dev
 
--------------------------------------------------------------
-CÓMO PROBARLO
--------------------------------------------------------------
-Prueba rápida de la suspensión (la más importante):
-1. ÁRBITRO: abrí la planilla confirmada de un partido y cargale
-   una ROJA a un jugador (o varias amarillas al mismo).
-2. CLUB: entrá a Partidos → "Gestionar Plantel" del SIGUIENTE
-   partido de ese equipo → ese jugador aparece abajo de todo en
-   rojo: "Suspendido — no se puede convocar" (con el motivo).
-3. ADMIN: Competencias → tu torneo → abajo de la tabla de
-   posiciones aparece "Suspensiones activas".
-4. ADMIN: cargá/confirmá el resultado de ese partido (sin el
-   suspendido) → la suspensión se descuenta sola → el jugador
-   vuelve a estar disponible para la fecha siguiente.
-5. PÚBLICO: abrí http://localhost:3000/estadisticas (sin login)
-   → tabla de goleadores, tarjetas y suspensiones activas,
-   con selector de torneo arriba.
+Pruebas (2 minutos):
+1. ABRÍ UNA VENTANA DE INCÓGNITO y entrá a:
+   http://localhost:3000/admin/dashboard
+   → tiene que mandarte SOLO a /login (antes se veía la pantalla).
+2. Entrá como CLUB y pegá en la barra:
+   http://localhost:3000/admin/dashboard
+   → tiene que rebotarte a tu panel de club.
+3. Entrá como CLUB → Plantel: tiene que seguir mostrando TUS
+   jugadores igual que siempre.
+4. Entrá como ÁRBITRO → Planillas: la planilla tiene que seguir
+   mostrando los jugadores de los dos equipos del partido.
+5. Entrá como ADMIN → Equipos: el listado de clubes tiene que
+   verse completo como siempre.
 
-Dato: para probar amarillas más rápido, creá un torneo de prueba
-con "Amarillas para suspensión" = 2 en el formulario del torneo.
+Si alguna de las pruebas 3, 4 o 5 falla (pantalla vacía o error),
+avisame con una captura y lo ajustamos al toque.
 
-Si algo falla, copiá el mensaje de error completo y mandamelo.
 =============================================================
