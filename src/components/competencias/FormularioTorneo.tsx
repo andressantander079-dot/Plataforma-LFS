@@ -24,6 +24,9 @@ export function FormularioTorneo({ categorias }: { categorias: Categoria[] }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pendiente, startTransition] = useTransition();
+  const [formato, setFormato] = useState("liga");
+
+  const tienePlayoff = formato === "liga_playoffs" || formato === "grupos_playoffs";
 
   return (
     <form
@@ -72,27 +75,51 @@ export function FormularioTorneo({ categorias }: { categorias: Categoria[] }) {
 
         <label className={CLASE_LABEL}>
           Formato
-          <select name="format" defaultValue="liga" className={CLASE_INPUT}>
+          <select
+            name="format"
+            value={formato}
+            onChange={(e) => setFormato(e.target.value)}
+            className={CLASE_INPUT}
+          >
             <option value="liga">Liga — todos contra todos</option>
-            <option value="eliminacion" disabled>
-              Eliminación directa (fase 2)
-            </option>
-            <option value="grupos_playoffs" disabled>
-              Grupos + Playoffs (fase 2)
-            </option>
-            <option value="liga_playoffs" disabled>
-              Liga + Playoffs (fase 2)
-            </option>
+            <option value="eliminacion">Eliminación directa</option>
+            <option value="grupos_playoffs">Grupos + Playoffs</option>
+            <option value="liga_playoffs">Liga + Playoffs</option>
           </select>
         </label>
 
-        <label className={CLASE_LABEL}>
-          Partidos
-          <select name="rounds" defaultValue="1" className={CLASE_INPUT}>
-            <option value="1">Solo ida</option>
-            <option value="2">Ida y vuelta</option>
-          </select>
-        </label>
+        {tienePlayoff && (
+          <label className={CLASE_LABEL}>
+            Clasifican al playoff
+            <select name="playoff_qualifiers" defaultValue="4" className={CLASE_INPUT}>
+              <option value="2">2 equipos (final directa)</option>
+              <option value="4">4 equipos (semifinales)</option>
+              <option value="8">8 equipos (cuartos)</option>
+            </select>
+          </label>
+        )}
+
+        {formato === "grupos_playoffs" && (
+          <label className={CLASE_LABEL}>
+            Cantidad de grupos
+            <select name="groups_count" defaultValue="2" className={CLASE_INPUT}>
+              <option value="2">2 grupos (A y B)</option>
+              <option value="4">4 grupos (A, B, C y D)</option>
+            </select>
+          </label>
+        )}
+
+        {formato !== "eliminacion" ? (
+          <label className={CLASE_LABEL}>
+            Partidos
+            <select name="rounds" defaultValue="1" className={CLASE_INPUT}>
+              <option value="1">Solo ida</option>
+              <option value="2">Ida y vuelta</option>
+            </select>
+          </label>
+        ) : (
+          <input type="hidden" name="rounds" value="1" />
+        )}
 
         <label className={CLASE_LABEL}>
           Desempate en la tabla

@@ -19,7 +19,7 @@ export default async function PosicionesPublico({
 
   const { data: torneos } = await supabase
     .from("competitions")
-    .select("id, name, season, status, points_win, points_draw, points_loss, tiebreaker, categories(name)")
+    .select("id, name, season, status, format, points_win, points_draw, points_loss, tiebreaker, categories(name)")
     .order("created_at", { ascending: false });
 
   const seleccionado =
@@ -27,8 +27,21 @@ export default async function PosicionesPublico({
     (torneos ?? []).find((t) => t.status === "en_curso") ??
     (torneos ?? [])[0];
 
-  let filasConNombre: { nombre: string; teamId: string; puntos: number; pj: number; pg: number; pe: number; pp: number; gf: number; gc: number; dif: number }[] = [];
-  let vallaId: string | null = null;
+  interface FilaConNombre {
+    nombre: string;
+    teamId: string;
+    puntos: number;
+    pj: number;
+    pg: number;
+    pe: number;
+    pp: number;
+    gf: number;
+    gc: number;
+    dif: number;
+  }
+
+  let secciones: { titulo: string | null; filas: FilaConNombre[]; vallaId: string | null }[] = [];
+  let campeon: string | null = null;
 
   if (seleccionado) {
     const { data: insc } = await supabase
@@ -42,36 +55,73 @@ export default async function PosicionesPublico({
       ])
     );
 
+    // La tabla se alimenta SOLO de la fase regular (los playoffs no suman puntos)
     const { data: confirmados } = await supabase
       .from("matches")
-      .select("home_team_id, away_team_id, home_score, away_score")
+      .select("home_team_id, away_team_id, home_score, away_score, stage, group_name")
       .eq("competition_id", seleccionado.id)
       .eq("result_confirmed", true);
 
-    const tabla = calcularTabla(
-      (insc ?? []).map((i) => i.team_id),
-      (confirmados ?? [])
-        .filter((p) => p.home_score !== null && p.away_score !== null)
-        .map((p) => ({
+    const regulares = (confirmados ?? []).filter(
+      (p) =>
+        (p.stage ?? "fase_regular") === "fase_regular" &&
+        p.home_score !== null &&
+        p.away_score !== null
+    );
+    const config = {
+      pointsWin: seleccionado.points_win,
+      pointsDraw: seleccionado.points_draw,
+      pointsLoss: seleccionado.points_loss,
+      tiebreaker: seleccionado.tiebreaker as "diferencia_gol" | "enfrentamiento_directo",
+    };
+
+    const armarSeccion = (
+      titulo: string | null,
+      teamIds: string[],
+      partidos: typeof regulares
+    ) => {
+      const tabla = calcularTabla(
+        teamIds,
+        partidos.map((p) => ({
           homeTeamId: p.home_team_id,
           awayTeamId: p.away_team_id,
-          homeScore: p.home_score,
-          awayScore: p.away_score,
+          homeScore: p.home_score!,
+          awayScore: p.away_score!,
         })),
-      {
-        pointsWin: seleccionado.points_win,
-        pointsDraw: seleccionado.points_draw,
-        pointsLoss: seleccionado.points_loss,
-        tiebreaker: seleccionado.tiebreaker,
-      }
-    );
+        config
+      );
+      const valla = vallaMenosVencida(tabla);
+      return {
+        titulo,
+        vallaId: valla?.teamId ?? null,
+        filas: tabla.map((f) => ({ ...f, nombre: nombreEquipo.get(f.teamId) ?? "—" })),
+      };
+    };
 
-    const valla = vallaMenosVencida(tabla);
-    vallaId = valla?.teamId ?? null;
-    filasConNombre = tabla.map((f) => ({
-      ...f,
-      nombre: nombreEquipo.get(f.teamId) ?? "—",
-    }));
+    if (seleccionado.format === "grupos_playoffs") {
+      const grupos = [...new Set(regulares.map((p) => p.group_name).filter(Boolean))].sort() as string[];
+      secciones = grupos.map((g) => {
+        const delGrupo = regulares.filter((p) => p.group_name === g);
+        const equipos = [...new Set(delGrupo.flatMap((p) => [p.home_team_id, p.away_team_id]))];
+        return armarSeccion(`Grupo ${g}`, equipos, delGrupo);
+      });
+      if (secciones.length === 0) {
+        secciones = [armarSeccion(null, (insc ?? []).map((i) => i.team_id), [])];
+      }
+    } else {
+      secciones = [armarSeccion(null, (insc ?? []).map((i) => i.team_id), regulares)];
+    }
+
+    // Campeón: ganador de la final confirmada
+    const final = (confirmados ?? []).find(
+      (p) => p.stage === "final" && p.home_score !== null && p.away_score !== null
+    );
+    if (final) {
+      campeon =
+        nombreEquipo.get(
+          final.home_score > final.away_score ? final.home_team_id : final.away_team_id
+        ) ?? null;
+    }
   }
 
   return (
@@ -119,26 +169,44 @@ export default async function PosicionesPublico({
         </div>
       )}
 
-      {seleccionado && (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6 flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h2 className="font-serif text-lg font-black text-[#1A2A44]">
-              {seleccionado.name}
-            </h2>
-            {vallaId && (
-              <span className="text-[10px] font-bold text-green-700 bg-green-50 rounded-full px-2.5 py-1 flex items-center gap-1">
-                <Shield className="w-3 h-3" />
-                Valla menos vencida:{" "}
-                {filasConNombre.find((f) => f.teamId === vallaId)?.nombre}
-              </span>
-            )}
-          </div>
-          <TablaPosiciones filas={filasConNombre} vallaId={vallaId} />
-          <p className="text-[10px] text-slate-400">
-            Se actualiza automáticamente con los resultados confirmados por la federación.
+      {/* Campeón */}
+      {campeon && (
+        <div className="bg-gradient-to-r from-[#1A2A44] to-[#2A3A5C] rounded-2xl p-6 shadow-md text-center flex flex-col items-center gap-1">
+          <Trophy className="w-8 h-8 text-[#F97316]" />
+          <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">
+            Campeón del torneo
           </p>
+          <p className="font-serif text-2xl font-black text-white">{campeon}</p>
         </div>
       )}
+
+      {seleccionado &&
+        secciones.map((seccion, idx) => (
+          <div
+            key={seccion.titulo ?? "tabla"}
+            className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6 flex flex-col gap-3"
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="font-serif text-lg font-black text-[#1A2A44]">
+                {seccion.titulo ? `${seleccionado.name} · ${seccion.titulo}` : seleccionado.name}
+              </h2>
+              {seccion.vallaId && (
+                <span className="text-[10px] font-bold text-green-700 bg-green-50 rounded-full px-2.5 py-1 flex items-center gap-1">
+                  <Shield className="w-3 h-3" />
+                  Valla menos vencida:{" "}
+                  {seccion.filas.find((f) => f.teamId === seccion.vallaId)?.nombre}
+                </span>
+              )}
+            </div>
+            <TablaPosiciones filas={seccion.filas} vallaId={seccion.vallaId} />
+            {idx === secciones.length - 1 && (
+              <p className="text-[10px] text-slate-400">
+                Se actualiza automáticamente con los resultados confirmados por la federación.
+                Los partidos de playoff no suman puntos.
+              </p>
+            )}
+          </div>
+        ))}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Trophy, Users, CalendarRange, ListOrdered, Ban } from "lucide-react";
+import { ArrowLeft, Trophy, Users, CalendarRange, ListOrdered, Ban, GitBranch } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { calcularTabla, vallaMenosVencida } from "@/lib/core/competencias/tabla";
 import { cantidadFechas, cantidadPartidos } from "@/lib/core/competencias/fixture";
@@ -9,6 +9,9 @@ import { FixtureEditable, type PartidoUI } from "@/components/competencias/Fixtu
 import { GestionEquiposTorneo } from "@/components/competencias/GestionEquiposTorneo";
 import { AccionesTorneo } from "@/components/competencias/AccionesTorneo";
 import { BotonGenerarFixture } from "@/components/competencias/BotonGenerarFixture";
+import { BotonGenerarPlayoffs } from "@/components/competencias/BotonGenerarPlayoffs";
+import { LlavesPlayoff } from "@/components/competencias/LlavesPlayoff";
+import type { Etapa } from "@/lib/core/competencias/playoff";
 
 /**
  * DETALLE DE TORNEO (admin)
@@ -89,6 +92,9 @@ export default async function DetalleTorneo({
     id: p.id,
     matchday: p.matchday,
     round: p.round,
+    stage: (p.stage ?? "fase_regular") as Etapa,
+    group_name: p.group_name ?? null,
+    stage_order: p.stage_order ?? null,
     homeNombre: nombreEquipo.get(p.home_team_id) ?? "—",
     awayNombre: nombreEquipo.get(p.away_team_id) ?? "—",
     scheduled_at: p.scheduled_at,
@@ -102,33 +108,78 @@ export default async function DetalleTorneo({
     notes: p.notes,
   }));
 
-  // Tabla: solo resultados confirmados por la federación
+  // Tabla: solo resultados CONFIRMADOS de la fase regular (playoffs no suman)
   const confirmados = (partidos ?? []).filter(
-    (p) => p.result_confirmed && p.home_score !== null && p.away_score !== null
+    (p) =>
+      p.result_confirmed &&
+      p.home_score !== null &&
+      p.away_score !== null &&
+      (p.stage ?? "fase_regular") === "fase_regular"
   );
-  const tabla = calcularTabla(
-    equipos.map((e) => e.teamId),
-    confirmados.map((p) => ({
-      homeTeamId: p.home_team_id,
-      awayTeamId: p.away_team_id,
-      homeScore: p.home_score,
-      awayScore: p.away_score,
-    })),
-    {
-      pointsWin: torneo.points_win,
-      pointsDraw: torneo.points_draw,
-      pointsLoss: torneo.points_loss,
-      tiebreaker: torneo.tiebreaker,
+  const configTabla = {
+    pointsWin: torneo.points_win,
+    pointsDraw: torneo.points_draw,
+    pointsLoss: torneo.points_loss,
+    tiebreaker: torneo.tiebreaker,
+  };
+
+  const armarTabla = (teamIds: string[], lista: typeof confirmados) => {
+    const tabla = calcularTabla(
+      teamIds,
+      lista.map((p) => ({
+        homeTeamId: p.home_team_id,
+        awayTeamId: p.away_team_id,
+        homeScore: p.home_score,
+        awayScore: p.away_score,
+      })),
+      configTabla
+    );
+    return {
+      filas: tabla.map((f) => ({ ...f, nombre: nombreEquipo.get(f.teamId) ?? "—" })),
+      vallaId: vallaMenosVencida(tabla)?.teamId ?? null,
+    };
+  };
+
+  let seccionesTabla: { titulo: string | null; filas: ReturnType<typeof armarTabla>["filas"]; vallaId: string | null }[];
+  if (torneo.format === "grupos_playoffs") {
+    const grupos = [...new Set(confirmados.map((p) => p.group_name).filter(Boolean))].sort() as string[];
+    seccionesTabla = grupos.map((g) => {
+      const delGrupo = confirmados.filter((p) => p.group_name === g);
+      const equiposGrupo = [...new Set(delGrupo.flatMap((p) => [p.home_team_id, p.away_team_id]))];
+      const t = armarTabla(equiposGrupo, delGrupo);
+      return { titulo: `Grupo ${g}`, filas: t.filas, vallaId: t.vallaId };
+    });
+    if (seccionesTabla.length === 0) {
+      const t = armarTabla(equipos.map((e) => e.teamId), []);
+      seccionesTabla = [{ titulo: null, filas: t.filas, vallaId: t.vallaId }];
     }
-  );
-  const valla = vallaMenosVencida(tabla);
-  const filasConNombre = tabla.map((f) => ({
-    ...f,
-    nombre: nombreEquipo.get(f.teamId) ?? "—",
-  }));
+  } else {
+    const t = armarTabla(equipos.map((e) => e.teamId), confirmados);
+    seccionesTabla = [{ titulo: null, filas: t.filas, vallaId: t.vallaId }];
+  }
 
   const categoria = (torneo.categories as unknown as { name: string } | null)?.name ?? "—";
   const hayFixture = (partidos ?? []).length > 0;
+
+  // Playoffs: llaves generadas, formato con playoff y fase regular completa
+  const partidosPlayoff = partidosUI.filter((p) => p.stage !== "fase_regular");
+  const partidosRegulares = (partidos ?? []).filter(
+    (p) => (p.stage ?? "fase_regular") === "fase_regular"
+  );
+  const formatoConPlayoff =
+    torneo.format === "liga_playoffs" || torneo.format === "grupos_playoffs";
+  const faseRegularCompleta =
+    partidosRegulares.length > 0 && partidosRegulares.every((p) => p.result_confirmed);
+
+  // Campeón: ganador de la final confirmada
+  const final = (partidos ?? []).find(
+    (p) => p.stage === "final" && p.result_confirmed && p.home_score !== null && p.away_score !== null
+  );
+  const campeon = final
+    ? nombreEquipo.get(
+        final.home_score > final.away_score ? final.home_team_id : final.away_team_id
+      )
+    : null;
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl mx-auto">
@@ -150,6 +201,10 @@ export default async function DetalleTorneo({
               {categoria} · Temporada {torneo.season} · {FORMATO_UI[torneo.format]} ·{" "}
               {torneo.rounds === 2 ? "Ida y vuelta" : "Solo ida"} · Puntos {torneo.points_win}/
               {torneo.points_draw}/{torneo.points_loss}
+              {torneo.format === "liga_playoffs" &&
+                ` · Clasifican ${torneo.playoff_qualifiers} al playoff`}
+              {torneo.format === "grupos_playoffs" &&
+                ` · ${torneo.groups_count} grupos · Clasifican 2 por grupo`}
             </p>
           </div>
           <AccionesTorneo competitionId={id} estado={torneo.status} />
@@ -178,11 +233,23 @@ export default async function DetalleTorneo({
 
         {!hayFixture && (
           <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm flex flex-col items-center gap-3 text-center">
-            <p className="text-sm text-slate-500 max-w-md">
-              Con {equipos.length} equipos a {torneo.rounds === 2 ? "ida y vuelta" : "una vuelta"}{" "}
-              el torneo tendrá <strong>{cantidadPartidos(equipos.length, torneo.rounds)}</strong>{" "}
-              partidos en <strong>{cantidadFechas(equipos.length, torneo.rounds)}</strong> fechas.
-            </p>
+            {torneo.format === "eliminacion" ? (
+              <p className="text-sm text-slate-500 max-w-md">
+                Se sortea la primera ronda de la llave con los {equipos.length} equipos. Los que
+                sobran pasan de ronda automáticamente.
+              </p>
+            ) : torneo.format === "grupos_playoffs" ? (
+              <p className="text-sm text-slate-500 max-w-md">
+                Se reparten los {equipos.length} equipos en {torneo.groups_count} grupos parejos
+                (serpiente) y cada grupo juega todos contra todos.
+              </p>
+            ) : (
+              <p className="text-sm text-slate-500 max-w-md">
+                Con {equipos.length} equipos a {torneo.rounds === 2 ? "ida y vuelta" : "una vuelta"}{" "}
+                el torneo tendrá <strong>{cantidadPartidos(equipos.length, torneo.rounds)}</strong>{" "}
+                partidos en <strong>{cantidadFechas(equipos.length, torneo.rounds)}</strong> fechas.
+              </p>
+            )}
             <BotonGenerarFixture competitionId={id} cantidadEquipos={equipos.length} />
           </div>
         )}
@@ -197,16 +264,70 @@ export default async function DetalleTorneo({
         )}
       </section>
 
+      {/* Campeón */}
+      {campeon && (
+        <section className="bg-gradient-to-r from-[#1A2A44] to-[#2A3A5C] rounded-2xl p-6 shadow-md text-center flex flex-col items-center gap-1">
+          <Trophy className="w-8 h-8 text-[#F97316]" />
+          <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">
+            Campeón del torneo
+          </p>
+          <p className="font-serif text-2xl font-black text-white">{campeon}</p>
+        </section>
+      )}
+
+      {/* Llaves de playoff */}
+      {(partidosPlayoff.length > 0 || (formatoConPlayoff && hayFixture)) && (
+        <section className="flex flex-col gap-3">
+          <h2 className="font-serif text-base font-black text-[#1A2A44] flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-[#F97316]" />
+            Llaves de playoff
+          </h2>
+          {partidosPlayoff.length > 0 ? (
+            <LlavesPlayoff
+              partidos={partidosPlayoff.map((p) => ({
+                id: p.id,
+                stage: p.stage,
+                stage_order: p.stage_order,
+                homeNombre: p.homeNombre,
+                awayNombre: p.awayNombre,
+                home_score: p.home_score,
+                away_score: p.away_score,
+                result_confirmed: p.result_confirmed,
+              }))}
+            />
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm flex flex-col items-center gap-3 text-center">
+              <p className="text-sm text-slate-500 max-w-md">
+                Cuando termine la fase regular se generan los cruces: los mejores de la tabla se
+                enfrentan en llaves hasta la final.
+              </p>
+              <BotonGenerarPlayoffs competitionId={id} faseRegularCompleta={faseRegularCompleta} />
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Tabla de posiciones */}
       <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
         <h2 className="font-serif text-base font-black text-[#1A2A44] flex items-center gap-2">
           <ListOrdered className="w-4 h-4 text-[#F97316]" />
           Tabla de posiciones
         </h2>
-        <TablaPosiciones filas={filasConNombre} vallaId={valla?.teamId ?? null} />
+        {seccionesTabla.map((s) => (
+          <div key={s.titulo ?? "tabla"} className="flex flex-col gap-2">
+            {s.titulo && (
+              <p className="text-xs font-black text-[#1A2A44] uppercase tracking-wide">
+                {s.titulo}
+              </p>
+            )}
+            <TablaPosiciones filas={s.filas} vallaId={s.vallaId} />
+          </div>
+        ))}
         <p className="text-[10px] text-slate-400">
           Se actualiza sola con los resultados confirmados · Desempate:{" "}
           {torneo.tiebreaker === "enfrentamiento_directo" ? "enfrentamiento directo" : "diferencia de gol"}
+          {(torneo.format === "liga_playoffs" || torneo.format === "grupos_playoffs") &&
+            " · Los partidos de playoff no suman puntos"}
         </p>
       </section>
 

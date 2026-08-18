@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Calendar, MapPin, Trophy } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { LlavesPlayoff } from "@/components/competencias/LlavesPlayoff";
+import type { Etapa } from "@/lib/core/competencias/playoff";
 
 /**
  * FIXTURE PÚBLICO
@@ -40,16 +42,21 @@ export default async function FixturePublico({
   interface PartidoPublico {
     id: string;
     matchday: number | null;
+    stage: Etapa;
+    stage_order: number | null;
+    group_name: string | null;
     homeNombre: string;
     awayNombre: string;
     home_score: number | null;
     away_score: number | null;
     scheduled_at: string | null;
     status: string;
+    result_confirmed: boolean;
     venueNombre: string | null;
   }
 
   let grupos: [string, PartidoPublico[]][] = [];
+  let llaves: PartidoPublico[] = [];
 
   if (seleccionado) {
 
@@ -74,17 +81,23 @@ export default async function FixturePublico({
     const partidos: PartidoPublico[] = (matches ?? []).map((p) => ({
       id: p.id,
       matchday: p.matchday,
+      stage: (p.stage ?? "fase_regular") as Etapa,
+      stage_order: p.stage_order ?? null,
+      group_name: p.group_name ?? null,
       homeNombre: nombreEquipo.get(p.home_team_id) ?? "—",
       awayNombre: nombreEquipo.get(p.away_team_id) ?? "—",
       home_score: p.home_score,
       away_score: p.away_score,
       scheduled_at: p.scheduled_at,
       status: p.status,
+      result_confirmed: p.result_confirmed,
       venueNombre: (p.venues as unknown as { name: string } | null)?.name ?? null,
     }));
 
+    llaves = partidos.filter((p) => p.stage !== "fase_regular");
+
     const mapa = new Map<string, PartidoPublico[]>();
-    for (const p of partidos) {
+    for (const p of partidos.filter((p) => p.stage === "fase_regular")) {
       const clave = p.matchday !== null ? `Fecha ${p.matchday}` : "Sin fecha asignada";
       if (!mapa.has(clave)) mapa.set(clave, []);
       mapa.get(clave)!.push(p);
@@ -140,7 +153,7 @@ export default async function FixturePublico({
         </div>
       )}
 
-      {seleccionado && grupos.length === 0 && (
+      {seleccionado && grupos.length === 0 && llaves.length === 0 && (
         <p className="text-center text-sm text-slate-400 py-8">
           Este torneo todavía no tiene fixture generado.
         </p>
@@ -155,6 +168,11 @@ export default async function FixturePublico({
             {lista.map((p) => (
               <li key={p.id} className="px-4 py-3 flex flex-col gap-1">
                 <div className="flex items-center gap-2 text-sm">
+                  {p.group_name && (
+                    <span className="shrink-0 text-[9px] font-bold uppercase bg-[#F97316]/10 text-[#F97316] rounded-full px-2 py-0.5">
+                      Grupo {p.group_name}
+                    </span>
+                  )}
                   <span className="flex-1 text-right font-bold text-[#1A2A44] truncate">
                     {p.homeNombre}
                   </span>
@@ -185,6 +203,22 @@ export default async function FixturePublico({
           </ul>
         </section>
       ))}
+
+      {/* Llaves de playoff */}
+      {llaves.length > 0 && (
+        <LlavesPlayoff
+          partidos={llaves.map((p) => ({
+            id: p.id,
+            stage: p.stage,
+            stage_order: p.stage_order,
+            homeNombre: p.homeNombre,
+            awayNombre: p.awayNombre,
+            home_score: p.home_score,
+            away_score: p.away_score,
+            result_confirmed: p.result_confirmed,
+          }))}
+        />
+      )}
     </div>
   );
 }

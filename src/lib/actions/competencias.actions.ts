@@ -3,6 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { generarCruces } from "@/lib/core/competencias/fixture";
+import {
+  asignarGrupos,
+  crucesEntreGrupos,
+  crucesSembrados,
+  emparejarSiguienteRonda,
+  etapaParaCantidad,
+  primeraRondaEliminacion,
+  siguienteEtapa,
+  type Etapa,
+} from "@/lib/core/competencias/playoff";
+import { calcularTabla } from "@/lib/core/competencias/tabla";
 
 /**
  * COMPETENCIAS LFS — Acciones de servidor (núcleo)
@@ -120,6 +131,8 @@ export async function crearTorneo(formData: FormData) {
   const wo_home_goals = Number(formData.get("wo_home_goals") ?? 5);
   const wo_away_goals = Number(formData.get("wo_away_goals") ?? 0);
   const yellow_cards_suspension = Number(formData.get("yellow_cards_suspension") ?? 5);
+  const playoff_qualifiers = Number(formData.get("playoff_qualifiers") ?? 4);
+  const groups_count = Number(formData.get("groups_count") ?? 2);
 
   if (!name) return { error: "El nombre del torneo es obligatorio." };
   if (!category_id) return { error: "Elegí una categoría." };
@@ -129,6 +142,12 @@ export async function crearTorneo(formData: FormData) {
   if (![1, 2].includes(rounds)) return { error: "Las vueltas deben ser 1 (ida) o 2 (ida y vuelta)." };
   if (tiebreaker !== "diferencia_gol" && tiebreaker !== "enfrentamiento_directo") {
     return { error: "Criterio de desempate inválido." };
+  }
+  if (![2, 4, 8].includes(playoff_qualifiers)) {
+    return { error: "Los clasificados al playoff deben ser 2, 4 u 8." };
+  }
+  if (![2, 4].includes(groups_count)) {
+    return { error: "La cantidad de grupos debe ser 2 o 4." };
   }
 
   const { data: torneo, error } = await supabase
@@ -146,6 +165,8 @@ export async function crearTorneo(formData: FormData) {
       wo_home_goals,
       wo_away_goals,
       yellow_cards_suspension,
+      playoff_qualifiers,
+      groups_count,
     })
     .select("id")
     .single();
@@ -340,7 +361,7 @@ export async function generarFixture(competitionId: string) {
 
   const { data: torneo } = await supabase
     .from("competitions")
-    .select("rounds")
+    .select("rounds, format, groups_count")
     .eq("id", competitionId)
     .single();
   if (!torneo) return { error: "El torneo no existe." };
@@ -378,21 +399,295 @@ export async function generarFixture(competitionId: string) {
     [mezclados[i], mezclados[j]] = [mezclados[j], mezclados[i]];
   }
 
-  const cruces = generarCruces(mezclados.length, torneo.rounds as 1 | 2);
+  let partidos: Record<string, unknown>[] = [];
 
-  const partidos = cruces.map((c) => ({
-    competition_id: competitionId,
-    matchday: c.matchday,
-    round: c.round,
-    home_team_id: mezclados[c.homeIndex],
-    away_team_id: mezclados[c.awayIndex],
-  }));
+  if (torneo.format === "eliminacion") {
+    // Eliminación directa: se sortea la primera ronda de la llave.
+    // Los equipos que sobran (bye) pasan de ronda automáticamente.
+    if (mezclados.length < 3) {
+      return { error: "La eliminación directa necesita al menos 3 equipos." };
+    }
+    const ronda = primeraRondaEliminacion(mezclados);
+    partidos = ronda.cruces.map((c) => ({
+      competition_id: competitionId,
+      stage: ronda.etapa,
+      stage_order: c.orden,
+      home_team_id: c.home,
+      away_team_id: c.away,
+    }));
+  } else if (torneo.format === "grupos_playoffs") {
+    // Grupos: reparto serpiente + todos contra todos dentro de cada grupo
+    const grupos = asignarGrupos(mezclados, torneo.groups_count);
+    for (const grupo of grupos) {
+      if (grupo.teamIds.length < 2) {
+        return { error: "Hay muy pocos equipos para la cantidad de grupos elegida." };
+      }
+      const cruces = generarCruces(grupo.teamIds.length, torneo.rounds as 1 | 2);
+      partidos.push(
+        ...cruces.map((c) => ({
+          competition_id: competitionId,
+          matchday: c.matchday,
+          round: c.round,
+          group_name: grupo.nombre,
+          home_team_id: grupo.teamIds[c.homeIndex],
+          away_team_id: grupo.teamIds[c.awayIndex],
+        }))
+      );
+    }
+  } else {
+    // Liga y Liga + Playoffs: todos contra todos (el playoff se genera después)
+    const cruces = generarCruces(mezclados.length, torneo.rounds as 1 | 2);
+    partidos = cruces.map((c) => ({
+      competition_id: competitionId,
+      matchday: c.matchday,
+      round: c.round,
+      home_team_id: mezclados[c.homeIndex],
+      away_team_id: mezclados[c.awayIndex],
+    }));
+  }
 
   const { error } = await supabase.from("matches").insert(partidos);
   if (error) return { error: "No se pudo guardar el fixture generado." };
 
   revalidarCompetencias(competitionId);
   return { ok: true, partidos: partidos.length };
+}
+
+// ============================================================================
+// LLAVES DE PLAYOFF (Paso 7C)
+// ============================================================================
+
+/**
+ * Genera la primera llave de playoff de un torneo con formato
+ * "liga_playoffs" o "grupos_playoffs", usando la tabla de posiciones
+ * de la fase regular. En "eliminacion" la llave avanza sola.
+ */
+export async function generarPlayoffs(competitionId: string) {
+  const { supabase } = await requireAdmin();
+
+  const { data: torneo } = await supabase
+    .from("competitions")
+    .select(
+      "format, playoff_qualifiers, groups_count, points_win, points_draw, points_loss, tiebreaker"
+    )
+    .eq("id", competitionId)
+    .single();
+  if (!torneo) return { error: "El torneo no existe." };
+  if (torneo.format !== "liga_playoffs" && torneo.format !== "grupos_playoffs") {
+    return { error: "Este formato no tiene llave de playoff aparte." };
+  }
+
+  // ¿Ya se generaron?
+  const { data: yaHay } = await supabase
+    .from("matches")
+    .select("id")
+    .eq("competition_id", competitionId)
+    .neq("stage", "fase_regular")
+    .limit(1);
+  if ((yaHay?.length ?? 0) > 0) {
+    return { error: "Las llaves de playoff ya fueron generadas." };
+  }
+
+  // Toda la fase regular tiene que estar confirmada
+  const { data: regulares } = await supabase
+    .from("matches")
+    .select("home_team_id, away_team_id, home_score, away_score, result_confirmed, group_name")
+    .eq("competition_id", competitionId)
+    .eq("stage", "fase_regular");
+
+  if (!regulares || regulares.length === 0) {
+    return { error: "Primero generá el fixture de la fase regular." };
+  }
+  const pendientes = regulares.filter((p) => !p.result_confirmed).length;
+  if (pendientes > 0) {
+    return {
+      error: `Todavía hay ${pendientes} partido${pendientes > 1 ? "s" : ""} sin confirmar. Las llaves se generan cuando termina la fase regular.`,
+    };
+  }
+
+  const config = {
+    pointsWin: torneo.points_win,
+    pointsDraw: torneo.points_draw,
+    pointsLoss: torneo.points_loss,
+    tiebreaker: torneo.tiebreaker as "diferencia_gol" | "enfrentamiento_directo",
+  };
+
+  let cruces: { home: string; away: string; orden: number }[];
+  let etapa: Etapa;
+
+  if (torneo.format === "liga_playoffs") {
+    // Tabla única: clasifican los N mejores y se siembran 1° vs último…
+    const equipos = [...new Set(regulares.flatMap((p) => [p.home_team_id, p.away_team_id]))];
+    if (equipos.length < torneo.playoff_qualifiers) {
+      return { error: "Hay menos equipos que clasificados al playoff configurados." };
+    }
+    const tabla = calcularTabla(
+      equipos,
+      regulares.map((p) => ({
+        homeTeamId: p.home_team_id,
+        awayTeamId: p.away_team_id,
+        homeScore: p.home_score,
+        awayScore: p.away_score,
+      })),
+      config
+    );
+    const clasificados = tabla.slice(0, torneo.playoff_qualifiers).map((f) => f.teamId);
+    etapa = etapaParaCantidad(clasificados.length);
+    cruces = crucesSembrados(clasificados.length).map((c) => ({
+      home: clasificados[c.homeIndex],
+      away: clasificados[c.awayIndex],
+      orden: c.orden,
+    }));
+  } else {
+    // Grupos: tabla por grupo, clasifican los 2 primeros de cada uno
+    const nombresGrupos = [...new Set(regulares.map((p) => p.group_name).filter(Boolean))].sort() as string[];
+    const clasificados: { grupo: string; posicion: number; teamId: string }[] = [];
+
+    for (const nombre of nombresGrupos) {
+      const delGrupo = regulares.filter((p) => p.group_name === nombre);
+      const equipos = [...new Set(delGrupo.flatMap((p) => [p.home_team_id, p.away_team_id]))];
+      const tabla = calcularTabla(
+        equipos,
+        delGrupo.map((p) => ({
+          homeTeamId: p.home_team_id,
+          awayTeamId: p.away_team_id,
+          homeScore: p.home_score,
+          awayScore: p.away_score,
+        })),
+        config
+      );
+      tabla.slice(0, 2).forEach((f, i) => {
+        clasificados.push({ grupo: nombre, posicion: i + 1, teamId: f.teamId });
+      });
+    }
+
+    if (clasificados.length < 4) {
+      return { error: "No hay suficientes equipos clasificados desde los grupos." };
+    }
+    etapa = etapaParaCantidad(clasificados.length);
+    cruces = crucesEntreGrupos(clasificados);
+  }
+
+  const partidos = cruces.map((c) => ({
+    competition_id: competitionId,
+    stage: etapa,
+    stage_order: c.orden,
+    home_team_id: c.home,
+    away_team_id: c.away,
+  }));
+
+  const { error } = await supabase.from("matches").insert(partidos);
+  if (error) return { error: "No se pudieron guardar las llaves." };
+
+  revalidarCompetencias(competitionId);
+  return { ok: true, partidos: partidos.length };
+}
+
+/**
+ * AVANCE AUTOMÁTICO DE LLAVE.
+ * Se llama cada vez que un partido de playoff queda confirmado:
+ * si era el último pendiente de su etapa, arma la siguiente ronda
+ * (ganadores cruzados por stage_order + equipos con bye) o, si era
+ * la final, marca el torneo como finalizado.
+ */
+async function avanzarLlaveSiCorresponde(
+  supabase: Awaited<ReturnType<typeof createLfsServerClient>>,
+  partidoId: string
+) {
+  const { data: partido } = await supabase
+    .from("matches")
+    .select("competition_id, stage")
+    .eq("id", partidoId)
+    .single();
+  if (!partido || partido.stage === "fase_regular") return;
+
+  const { data: deLaEtapa } = await supabase
+    .from("matches")
+    .select(
+      "id, home_team_id, away_team_id, home_score, away_score, result_confirmed, stage_order"
+    )
+    .eq("competition_id", partido.competition_id)
+    .eq("stage", partido.stage)
+    .order("stage_order");
+
+  if (!deLaEtapa || deLaEtapa.some((p) => !p.result_confirmed)) return; // todavía falta
+
+  // La final confirmada => torneo terminado
+  if (partido.stage === "final") {
+    await supabase
+      .from("competitions")
+      .update({ status: "finalizado" })
+      .eq("id", partido.competition_id);
+    return;
+  }
+
+  const ganadores = deLaEtapa.map((p) =>
+    p.home_score > p.away_score ? p.home_team_id : p.away_team_id
+  );
+
+  // Equipos con bye: inscriptos que NO jugaron esta etapa (solo pasa en la
+  // primera ronda de eliminación directa)
+  const { data: inscripciones } = await supabase
+    .from("competition_teams")
+    .select("team_id")
+    .eq("competition_id", partido.competition_id);
+  const jugaron = new Set(deLaEtapa.flatMap((p) => [p.home_team_id, p.away_team_id]));
+  const { data: rondasAnteriores } = await supabase
+    .from("matches")
+    .select("home_team_id, away_team_id, home_score, away_score")
+    .eq("competition_id", partido.competition_id)
+    .neq("stage", "fase_regular")
+    .neq("stage", partido.stage);
+  const eliminados = new Set(
+    (rondasAnteriores ?? []).map((p) =>
+      p.home_score > p.away_score ? p.away_team_id : p.home_team_id
+    )
+  );
+  const byes = (inscripciones ?? [])
+    .map((i) => i.team_id)
+    .filter((id) => !jugaron.has(id) && !eliminados.has(id));
+
+  const participantes = [...ganadores, ...byes];
+  if (participantes.length < 2) return;
+
+  const proxima = siguienteEtapa(partido.stage as Etapa) ?? etapaParaCantidad(participantes.length);
+  const cruces = emparejarSiguienteRonda(participantes);
+
+  const { error } = await supabase.from("matches").insert(
+    cruces.map((c) => ({
+      competition_id: partido.competition_id,
+      stage: proxima,
+      stage_order: c.orden,
+      home_team_id: c.home,
+      away_team_id: c.away,
+    }))
+  );
+
+  if (!error && proxima === "final" && cruces.length === 0) {
+    await supabase
+      .from("competitions")
+      .update({ status: "finalizado" })
+      .eq("id", partido.competition_id);
+  }
+}
+
+/** En playoff no hay empate: el marcador debe definir un ganador (incluye penales). */
+async function validarEmpatePlayoff(
+  supabase: Awaited<ReturnType<typeof createLfsServerClient>>,
+  partidoId: string,
+  homeScore: number,
+  awayScore: number
+): Promise<string | null> {
+  if (homeScore !== awayScore) return null;
+  const { data: partido } = await supabase
+    .from("matches")
+    .select("stage")
+    .eq("id", partidoId)
+    .single();
+  if (partido && partido.stage !== "fase_regular") {
+    return "En llaves de playoff no puede haber empate: cargá el resultado con los penales incluidos (ej: 6-5).";
+  }
+  return null;
 }
 
 // ============================================================================
@@ -456,6 +751,10 @@ export async function cargarResultadoArbitro(partidoId: string, formData: FormDa
     return { error: "Los goles deben ser números enteros entre 0 y 99." };
   }
 
+  // En playoff no hay empate: el árbitro carga el resultado con penales incluidos
+  const errorEmpate = await validarEmpatePlayoff(supabase, partidoId, homeScore, awayScore);
+  if (errorEmpate) return { error: errorEmpate };
+
   // RLS garantiza que solo el árbitro designado puede actualizar este partido
   const { data, error } = await supabase
     .from("matches")
@@ -488,6 +787,9 @@ export async function cargarResultadoAdmin(partidoId: string, formData: FormData
     return { error: "Los goles deben ser números enteros entre 0 y 99." };
   }
 
+  const errorEmpate = await validarEmpatePlayoff(supabase, partidoId, homeScore, awayScore);
+  if (errorEmpate) return { error: errorEmpate };
+
   // estado previo: solo se descuentan suspensiones al pasar a confirmado
   const { data: previo } = await supabase
     .from("matches")
@@ -509,6 +811,7 @@ export async function cargarResultadoAdmin(partidoId: string, formData: FormData
 
   if (!previo?.result_confirmed) {
     await descontarSuspensionesDelPartido(supabase, partidoId);
+    await avanzarLlaveSiCorresponde(supabase, partidoId);
   }
 
   revalidarCompetencias(competitionId);
@@ -521,9 +824,20 @@ export async function confirmarResultado(partidoId: string, competitionId: strin
 
   const { data: previo } = await supabase
     .from("matches")
-    .select("result_confirmed")
+    .select("result_confirmed, home_score, away_score, stage")
     .eq("id", partidoId)
     .single();
+
+  if (
+    previo &&
+    previo.stage !== "fase_regular" &&
+    previo.home_score !== null &&
+    previo.home_score === previo.away_score
+  ) {
+    return {
+      error: "En llaves de playoff no puede haber empate: corregí el resultado con los penales incluidos.",
+    };
+  }
 
   const { error } = await supabase
     .from("matches")
@@ -534,6 +848,7 @@ export async function confirmarResultado(partidoId: string, competitionId: strin
 
   if (!previo?.result_confirmed) {
     await descontarSuspensionesDelPartido(supabase, partidoId);
+    await avanzarLlaveSiCorresponde(supabase, partidoId);
   }
 
   revalidarCompetencias(competitionId);
@@ -574,6 +889,7 @@ export async function marcarWO(partidoId: string, competitionId: string, ganador
 
   if (!previo?.result_confirmed) {
     await descontarSuspensionesDelPartido(supabase, partidoId);
+    await avanzarLlaveSiCorresponde(supabase, partidoId);
   }
 
   revalidarCompetencias(competitionId);

@@ -20,6 +20,7 @@ import {
   confirmarResultado,
   marcarWO,
 } from "@/lib/actions/competencias.actions";
+import { NOMBRE_ETAPA, ORDEN_ETAPA, type Etapa } from "@/lib/core/competencias/playoff";
 
 /**
  * FIXTURE EDITABLE (admin/federación)
@@ -34,6 +35,9 @@ export interface PartidoUI {
   id: string;
   matchday: number | null;
   round: number;
+  stage: Etapa;
+  group_name: string | null;
+  stage_order: number | null;
   homeNombre: string;
   awayNombre: string;
   scheduled_at: string | null;
@@ -101,18 +105,27 @@ export function FixtureEditable({ competitionId, partidos, canchas, arbitros }: 
     });
   }
 
-  // Agrupar por fecha (jornada)
-  const porFecha = new Map<number | string, PartidoUI[]>();
+  // Agrupar: fase regular por fecha (jornada); playoffs por etapa
+  const porSeccion = new Map<number | string, PartidoUI[]>();
   for (const p of partidos) {
-    const clave = p.matchday !== null ? p.matchday : "sin-fecha";
-    if (!porFecha.has(clave)) porFecha.set(clave, []);
-    porFecha.get(clave)!.push(p);
+    const clave =
+      p.stage !== "fase_regular" ? `etapa:${p.stage}` : p.matchday !== null ? p.matchday : "sin-fecha";
+    if (!porSeccion.has(clave)) porSeccion.set(clave, []);
+    porSeccion.get(clave)!.push(p);
   }
-  const grupos = Array.from(porFecha.entries()).sort((a, b) => {
-    const numA = typeof a[0] === "number" ? a[0] : 9999;
-    const numB = typeof b[0] === "number" ? b[0] : 9999;
-    return numA - numB;
-  });
+  const ordenClave = (c: number | string): number => {
+    if (typeof c === "number") return c;
+    if (c.startsWith("etapa:")) return 1000 + ORDEN_ETAPA[c.slice(6) as Etapa];
+    return 999;
+  };
+  const tituloClave = (c: number | string): string => {
+    if (typeof c === "number") return `Fecha ${c}`;
+    if (c.startsWith("etapa:")) return NOMBRE_ETAPA[c.slice(6) as Etapa];
+    return "Sin fecha asignada";
+  };
+  const grupos = Array.from(porSeccion.entries()).sort(
+    (a, b) => ordenClave(a[0]) - ordenClave(b[0])
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -126,9 +139,7 @@ export function FixtureEditable({ competitionId, partidos, canchas, arbitros }: 
         <div key={String(fecha)} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
           <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
             <Calendar className="w-4 h-4 text-[#F97316]" />
-            <span className="font-bold text-sm text-[#1A2A44]">
-              {typeof fecha === "number" ? `Fecha ${fecha}` : "Sin fecha asignada"}
-            </span>
+            <span className="font-bold text-sm text-[#1A2A44]">{tituloClave(fecha)}</span>
             <span className="text-[11px] text-slate-400">
               {lista.length} partido{lista.length !== 1 ? "s" : ""}
             </span>
@@ -153,6 +164,11 @@ export function FixtureEditable({ competitionId, partidos, canchas, arbitros }: 
                     <span className="font-bold text-[#1A2A44] flex-1 truncate">{p.awayNombre}</span>
                   </div>
 
+                  {p.group_name && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#F97316]/10 text-[#F97316]">
+                      Grupo {p.group_name}
+                    </span>
+                  )}
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ESTADO_UI[p.status].className}`}>
                     {ESTADO_UI[p.status].label}
                   </span>
