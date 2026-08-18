@@ -1,195 +1,158 @@
-"use client";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import {
+  Wallet,
+  ClipboardList,
+  Settings,
+  Clock,
+  TrendingUp,
+  AlertTriangle,
+  ArrowRight,
+} from "lucide-react";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { estadoCargo, formatoPesos } from "@/lib/core/tesoreria/money";
 
-import { useState } from "react";
-import { Wallet, ShieldAlert, Lock, ArrowUpRight, ArrowDownRight, Save } from "lucide-react";
-import { validateAdminOperation } from "../../../lib/security/adminGuard";
+/**
+ * TESORERÍA — Panel principal (admin + tesorero)
+ * Resumen del dinero de la liga: deuda viva, recaudación del mes y
+ * comprobantes esperando aprobación.
+ */
+export default async function TesoreriaPanel() {
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
-// Mock de Movimientos de Tesorería LFS
-const INITIAL_MOVEMENTS = [
-  { id: "t1", date: "2026-07-28", type: "Ingreso", club: "Club Camioneros", desc: "Inscripción Plantel Sub-18", dni: "44111222", amount: 15000 },
-  { id: "t2", date: "2026-07-29", type: "Egreso", club: "Todos", desc: "Pago Honorarios Árbitro Principal", dni: "20999888", amount: 25000 },
-  { id: "t3", date: "2026-07-30", type: "Ingreso", club: "HAF Ushuaia", desc: "Comprobante Pase de Jugador", dni: "45222333", amount: 8000 },
-];
+  const [{ data: settings }, { data: cargos }, { data: pagosAprobados }, { count: pendientesCount }] =
+    await Promise.all([
+      supabase.from("treasury_settings").select("late_fee_percent").eq("id", 1).single(),
+      supabase
+        .from("treasury_charges")
+        .select("id, monto, fecha_vencimiento, status")
+        .neq("status", "anulado"),
+      supabase
+        .from("treasury_payments")
+        .select("charge_id, monto, created_at")
+        .eq("status", "aprobado"),
+      supabase
+        .from("treasury_payments")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pendiente"),
+    ]);
 
-export default function TesoreriaAdmin() {
-  const [pin, setPin] = useState("");
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [movements, setMovements] = useState(INITIAL_MOVEMENTS);
-  const [error, setError] = useState("");
-
-  // Formulario de nuevo movimiento
-  const [type, setType] = useState("Ingreso");
-  const [club, setClub] = useState("Club Camioneros");
-  const [desc, setDesc] = useState("");
-  const [dni, setDni] = useState("");
-  const [amount, setAmount] = useState("");
-
-  const handleUnlock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    try {
-      // Validar el acceso seguro con código "00T00" en el guardrail
-      await validateAdminOperation(
-        pin,
-        "00T00",
-        "admin",
-        { userId: "admin-1", action: "ACCESO_MODULO", module: "TESORERIA", details: {} },
-        async (log) => console.log("[AUDIT_LOG]: Acceso concedido a Tesorería por", log.userId)
-      );
-      setIsUnlocked(true);
-    } catch (err: any) {
-      setError(err.message || "Código de acceso inválido.");
-    }
-  };
-
-  const handleAddMovement = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!desc.trim() || !amount) {
-      alert("Por favor complete los campos obligatorios.");
-      return;
-    }
-    const newM = {
-      id: `t-${Date.now()}`,
-      date: new Date().toISOString().split("T")[0],
-      type,
-      club,
-      desc,
-      dni: dni.trim() || "N/A",
-      amount: parseFloat(amount),
-    };
-    setMovements((prev) => [newM, ...prev]);
-    setDesc("");
-    setDni("");
-    setAmount("");
-    console.log("[AUDIT_LOG]: Nuevo movimiento registrado", newM);
-  };
-
-  const totalBalance = movements.reduce((acc, curr) => {
-    return curr.type === "Ingreso" ? acc + curr.amount : acc - curr.amount;
-  }, 0);
-
-  if (!isUnlocked) {
-    return (
-      <div className="max-w-md mx-auto mt-20 bg-white border border-slate-200 rounded-2xl p-6 shadow-xl flex flex-col gap-6 text-center">
-        <div className="w-16 h-16 bg-red-50 text-red-650 rounded-full flex items-center justify-center mx-auto shadow-inner">
-          <Lock className="w-8 h-8" />
-        </div>
-        <div>
-          <h2 className="font-serif text-2xl font-black text-[#1A2A44]">Módulo Seguro de Tesorería</h2>
-          <p className="text-slate-500 text-xs mt-1">Este sector contiene información contable protegida. Ingrese clave para continuar.</p>
-        </div>
-        <form onSubmit={handleUnlock} className="flex flex-col gap-4">
-          <input
-            type="password"
-            placeholder="Ingrese PIN de Seguridad (00T00)"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-center text-lg tracking-widest font-black focus:outline-none focus:ring-1 focus:ring-[#F97316]"
-          />
-          {error && <span className="text-xs text-red-500 font-bold">{error}</span>}
-          <button type="submit" className="w-full py-3 rounded-xl font-bold bg-[#F97316] text-white hover:bg-[#F97316]/95 transition shadow-lg shadow-[#F97316]/10 text-sm">
-            Verificar y Desbloquear
-          </button>
-        </form>
-      </div>
-    );
+  const lateFee = Number(settings?.late_fee_percent ?? 0);
+  const aprobadoPorCargo = new Map<string, number>();
+  for (const p of pagosAprobados ?? []) {
+    aprobadoPorCargo.set(p.charge_id, (aprobadoPorCargo.get(p.charge_id) ?? 0) + Number(p.monto));
   }
 
+  let deudaTotal = 0;
+  let deudaVencida = 0;
+  for (const c of cargos ?? []) {
+    const e = estadoCargo(
+      Number(c.monto),
+      c.fecha_vencimiento,
+      lateFee,
+      aprobadoPorCargo.get(c.id) ?? 0,
+      c.status === "anulado"
+    );
+    deudaTotal += e.saldo;
+    if (e.estado === "vencido") deudaVencida += e.saldo;
+  }
+
+  const inicioMes = new Date();
+  inicioMes.setDate(1);
+  inicioMes.setHours(0, 0, 0, 0);
+  const recaudadoMes = (pagosAprobados ?? [])
+    .filter((p) => new Date(p.created_at) >= inicioMes)
+    .reduce((s, p) => s + Number(p.monto), 0);
+
+  const cantidadPendientes = pendientesCount ?? 0;
+
+  const KPIS = [
+    {
+      icon: TrendingUp,
+      label: "Recaudado este mes",
+      valor: formatoPesos(recaudadoMes),
+      clase: "text-green-700 bg-green-50",
+    },
+    {
+      icon: Wallet,
+      label: "Deuda total de clubes",
+      valor: formatoPesos(deudaTotal),
+      clase: "text-[#1A2A44] bg-slate-100",
+    },
+    {
+      icon: AlertTriangle,
+      label: "Deuda vencida (con recargo)",
+      valor: formatoPesos(deudaVencida),
+      clase: "text-red-700 bg-red-50",
+    },
+    {
+      icon: Clock,
+      label: "Comprobantes por aprobar",
+      valor: String(cantidadPendientes),
+      clase: "text-orange-700 bg-orange-50",
+    },
+  ];
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* Encabezado */}
-      <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 pb-5">
-        <div>
-          <h2 className="font-serif text-3xl font-black text-[#1A2A44] flex items-center gap-3">
-            <Wallet className="w-8 h-8 text-[#F97316]" />
-            Libro Diario de Tesorería
-          </h2>
-          <p className="text-slate-500 text-sm mt-1">Moneda del Sistema: Pesos Argentinos (ARS). Movimientos vinculados a DNI de jugadores.</p>
-        </div>
-        <div className="text-right">
-          <span className="text-xs text-slate-400 font-bold block uppercase tracking-wider">Saldo Caja Activo</span>
-          <span className="text-3xl font-serif font-black text-green-600">${totalBalance.toLocaleString("es-AR")} ARS</span>
-        </div>
-      </section>
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto">
+      <div className="border-b border-slate-200 pb-4">
+        <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
+          <Wallet className="w-7 h-7 text-[#F97316]" />
+          Tesorería
+        </h1>
+        <p className="text-slate-500 text-xs mt-0.5">
+          Cuentas de los clubes, cobros, multas automáticas y recibos oficiales.
+        </p>
+      </div>
 
-      {/* Grid: Registro y Listado */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Formulario de Alta */}
-        <form onSubmit={handleAddMovement} className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col gap-4 shadow-sm h-fit">
-          <h3 className="font-serif text-lg font-bold text-[#1A2A44]">Registrar Movimiento</h3>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">Tipo</label>
-              <select value={type} onChange={(e) => setType(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-[#1A2A44]">
-                <option value="Ingreso">Ingreso</option>
-                <option value="Egreso">Egreso</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">Monto (ARS)</label>
-              <input type="number" required placeholder="Importe" value={amount} onChange={(e) => setAmount(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-[#1A2A44]" />
-            </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {KPIS.map((k) => (
+          <div
+            key={k.label}
+            className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-2"
+          >
+            <span className={`w-8 h-8 rounded-xl flex items-center justify-center ${k.clase}`}>
+              <k.icon className="w-4 h-4" />
+            </span>
+            <p className="font-black text-lg text-[#1A2A44] leading-tight">{k.valor}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+              {k.label}
+            </p>
           </div>
+        ))}
+      </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-bold text-slate-400 uppercase">Club Vinculado</label>
-            <input type="text" value={club} onChange={(e) => setClub(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-[#1A2A44]" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Link
+          href="/admin/tesoreria/movimientos"
+          className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:border-[#F97316] transition flex items-center gap-3 group"
+        >
+          <ClipboardList className="w-6 h-6 text-[#F97316]" />
+          <div className="flex-1">
+            <p className="font-bold text-sm text-[#1A2A44]">Movimientos</p>
+            <p className="text-[11px] text-slate-500">
+              Aprobar comprobantes, cargar cuotas y ver la deuda de cada club.
+            </p>
           </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-bold text-slate-400 uppercase">DNI Vinculado (Opcional)</label>
-            <input type="text" placeholder="DNI del Jugador o DT" value={dni} onChange={(e) => setDni(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-[#1A2A44]" />
+          <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-[#F97316] transition" />
+        </Link>
+        <Link
+          href="/admin/tesoreria/configuracion"
+          className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:border-[#F97316] transition flex items-center gap-3 group"
+        >
+          <Settings className="w-6 h-6 text-[#F97316]" />
+          <div className="flex-1">
+            <p className="font-bold text-sm text-[#1A2A44]">Configuración</p>
+            <p className="text-[11px] text-slate-500">
+              Montos de multas, recargo por mora y datos fiscales de la liga.
+            </p>
           </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-bold text-slate-400 uppercase">Descripción / Detalle</label>
-            <input type="text" required placeholder="Concepto del movimiento" value={desc} onChange={(e) => setDesc(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-[#1A2A44]" />
-          </div>
-
-          <button type="submit" className="w-full mt-2 py-2.5 rounded-xl font-bold bg-[#F97316] text-white hover:bg-[#F97316]/95 transition text-xs flex items-center justify-center gap-1.5 shadow-md">
-            <Save className="w-4 h-4" /> Registrar Caja
-          </button>
-        </form>
-
-        {/* Listado de Movimientos */}
-        <section className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm overflow-x-auto">
-          <h3 className="font-sans text-xs font-black tracking-widest text-slate-400 uppercase mb-4">Últimas Transacciones</h3>
-          <table className="min-w-full text-xs">
-            <thead>
-              <tr className="text-slate-400 text-[10px] font-black uppercase tracking-wider border-b pb-2 text-left">
-                <th className="py-2 px-2">Fecha</th>
-                <th className="py-2 px-2">Detalle</th>
-                <th className="py-2 px-2">Club</th>
-                <th className="py-2 px-2">DNI</th>
-                <th className="py-2 px-2 text-right">Monto</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-sans">
-              {movements.map((m) => (
-                <tr key={m.id} className="hover:bg-slate-50/50 transition">
-                  <td className="py-3 px-2 font-mono text-slate-400">{m.date}</td>
-                  <td className="py-3 px-2">
-                    <span className="font-bold text-[#1A2A44] block">{m.desc}</span>
-                    <span className={`text-[9px] font-bold inline-flex items-center gap-1 ${
-                      m.type === "Ingreso" ? "text-green-600" : "text-red-500"
-                    }`}>
-                      {m.type === "Ingreso" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                      {m.type}
-                    </span>
-                  </td>
-                  <td className="py-3 px-2 text-slate-500 font-semibold">{m.club}</td>
-                  <td className="py-3 px-2 font-mono text-slate-550">{m.dni}</td>
-                  <td className={`py-3 px-2 text-right font-mono font-bold text-sm ${
-                    m.type === "Ingreso" ? "text-green-600" : "text-red-500"
-                  }`}>
-                    {m.type === "Ingreso" ? `+$${m.amount.toLocaleString("es-AR")}` : `-$${m.amount.toLocaleString("es-AR")}`}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+          <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-[#F97316] transition" />
+        </Link>
       </div>
     </div>
   );

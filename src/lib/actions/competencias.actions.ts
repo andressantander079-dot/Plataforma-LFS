@@ -14,6 +14,7 @@ import {
   type Etapa,
 } from "@/lib/core/competencias/playoff";
 import { calcularTabla } from "@/lib/core/competencias/tabla";
+import { crearMultaAutomatica } from "@/lib/actions/tesoreria.actions";
 
 /**
  * COMPETENCIAS LFS — Acciones de servidor (núcleo)
@@ -868,7 +869,7 @@ export async function marcarWO(partidoId: string, competitionId: string, ganador
 
   const { data: previo } = await supabase
     .from("matches")
-    .select("result_confirmed")
+    .select("result_confirmed, home_team_id, away_team_id")
     .eq("id", partidoId)
     .single();
 
@@ -890,6 +891,26 @@ export async function marcarWO(partidoId: string, competitionId: string, ganador
   if (!previo?.result_confirmed) {
     await descontarSuspensionesDelPartido(supabase, partidoId);
     await avanzarLlaveSiCorresponde(supabase, partidoId);
+
+    // MULTA AUTOMÁTICA POR W.O. (Paso 8A - Tesorería): multa al club
+    // del equipo que no se presentó. El monto sale de la configuración.
+    const perdedorId = ganador === "home" ? previo?.away_team_id : previo?.home_team_id;
+    if (perdedorId) {
+      const { data: equipoPerdedor } = await supabase
+        .from("teams")
+        .select("club_id, name")
+        .eq("id", perdedorId)
+        .single();
+      if (equipoPerdedor?.club_id) {
+        await crearMultaAutomatica({
+          clubId: equipoPerdedor.club_id,
+          competitionId,
+          tipo: "multa_wo",
+          descripcion: `${equipoPerdedor.name} — W.O. (no se presentó al partido)`,
+          eventoOrigenId: null,
+        });
+      }
+    }
   }
 
   revalidarCompetencias(competitionId);

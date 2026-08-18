@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { anularMultaDeEvento, crearMultaAutomatica } from "@/lib/actions/tesoreria.actions";
 
 /**
  * PLANILLA DIGITAL LFS — Paso 7A
@@ -963,6 +964,36 @@ export async function registrarEvento(formData: FormData): Promise<{ ok?: boolea
         partidos_pendientes: 1,
         evento_origen_id: eventoInsertado.id,
       });
+
+      // ---------------------------------------------------------------
+      // MULTA ECONÓMICA AUTOMÁTICA (Paso 8A - Tesorería)
+      // roja directa y acumulación de amarillas multan al CLUB.
+      // El monto sale del panel de configuración de tesorería.
+      // ---------------------------------------------------------------
+      const { data: equipoMultado } = await supabase
+        .from("teams")
+        .select("club_id, name")
+        .eq("id", teamId)
+        .single();
+
+      if (equipoMultado?.club_id) {
+        const { data: jugadorMultado } = await supabase
+          .from("players")
+          .select("first_name, last_name")
+          .eq("id", playerId)
+          .single();
+        const nombreJugador = jugadorMultado
+          ? `${jugadorMultado.last_name}, ${jugadorMultado.first_name}`
+          : "Jugador";
+
+        await crearMultaAutomatica({
+          clubId: equipoMultado.club_id,
+          competitionId: match.competition_id,
+          tipo: motivo === "roja" ? "multa_roja" : "multa_acumulacion_amarillas",
+          descripcion: `${equipoMultado.name} — ${motivo === "roja" ? "tarjeta roja" : "acumulación de amarillas"} de ${nombreJugador}`,
+          eventoOrigenId: eventoInsertado.id,
+        });
+      }
     }
   }
 
@@ -1003,6 +1034,9 @@ export async function eliminarEvento(
     .from("player_suspensions")
     .delete()
     .eq("evento_origen_id", eventoId);
+
+  // si el evento había generado una multa automática, se anula (queda registro)
+  await anularMultaDeEvento(eventoId);
 
   revalidarPlanillas(evento.match_id);
   return { ok: true };

@@ -3,9 +3,10 @@ import Link from "next/link";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion";
 import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria";
+import { estadoCargo, formatoPesos } from "@/lib/core/tesoreria/money";
 import {
   Users, Phone, KeyRound, UserRound, ShieldCheck, AlertCircle,
-  CheckCircle, XCircle, Mail, MessageSquare,
+  CheckCircle, XCircle, Mail, MessageSquare, Wallet,
 } from "lucide-react";
 
 /**
@@ -99,6 +100,45 @@ export default async function ClubDashboard() {
     .eq("club_id", clubData.id)
     .order("created_at");
 
+  // AVISO DE TESORERÍA (Paso 8A): cargos vivos del club para el cartel
+  const { data: cargosVivos } = await supabase
+    .from("treasury_charges")
+    .select("id, monto, fecha_vencimiento, status")
+    .eq("club_id", clubData.id)
+    .in("status", ["pendiente", "parcial"]);
+  const { data: pagosClub } = await supabase
+    .from("treasury_payments")
+    .select("charge_id, monto")
+    .eq("club_id", clubData.id)
+    .eq("status", "aprobado");
+  const { data: settingsTes } = await supabase
+    .from("treasury_settings")
+    .select("late_fee_percent")
+    .eq("id", 1)
+    .maybeSingle();
+
+  const aprobPorCargo = new Map<string, number>();
+  for (const p of pagosClub ?? []) {
+    aprobPorCargo.set(p.charge_id, (aprobPorCargo.get(p.charge_id) ?? 0) + Number(p.monto));
+  }
+  let deudaAviso = 0;
+  let cargosConDeuda = 0;
+  let hayVencidos = false;
+  for (const c of cargosVivos ?? []) {
+    const e = estadoCargo(
+      Number(c.monto),
+      c.fecha_vencimiento,
+      Number(settingsTes?.late_fee_percent ?? 0),
+      aprobPorCargo.get(c.id) ?? 0,
+      false
+    );
+    if (e.saldo > 0) {
+      deudaAviso += e.saldo;
+      cargosConDeuda++;
+      if (e.estado === "vencido") hayVencidos = true;
+    }
+  }
+
   // Todos los usuarios autorizados de este club
   const { data: usuarios } = await supabase
     .from("profiles")
@@ -148,6 +188,32 @@ export default async function ClubDashboard() {
       </header>
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6 flex flex-col gap-6">
+        {/* Aviso de tesorería: cargos pendientes / vencidos */}
+        {cargosConDeuda > 0 && (
+          <Link
+            href="/club/finanzas"
+            className={`rounded-2xl border p-4 flex items-center gap-3 shadow-sm transition hover:shadow-md ${
+              hayVencidos
+                ? "bg-red-50 border-red-200"
+                : "bg-orange-50 border-orange-200"
+            }`}
+          >
+            <Wallet
+              className={`w-6 h-6 shrink-0 ${hayVencidos ? "text-red-600" : "text-orange-500"}`}
+            />
+            <div className="flex-1">
+              <p className={`font-bold text-sm ${hayVencidos ? "text-red-800" : "text-orange-800"}`}>
+                Tenés {cargosConDeuda} cargo{cargosConDeuda > 1 ? "s" : ""} pendiente
+                {cargosConDeuda > 1 ? "s" : ""} por {formatoPesos(deudaAviso)}
+                {hayVencidos ? " · ¡Hay vencidos con recargo!" : ""}
+              </p>
+              <p className={`text-[11px] ${hayVencidos ? "text-red-600" : "text-orange-600"}`}>
+                Tocá acá para ver tu estado de cuenta e informar el pago.
+              </p>
+            </div>
+          </Link>
+        )}
+
         {/* Datos institucionales */}
         <section className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
           <div className="flex items-center gap-2 mb-4">

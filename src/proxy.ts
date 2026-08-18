@@ -16,7 +16,10 @@ import { createServerClient } from "@supabase/ssr";
  * Sin sesión → /login. Con rol equivocado → a su propio panel.
  */
 
+// OJO: "/admin/tesoreria" va ANTES que "/admin": el proxy toma la primera
+// sección que coincide, y el tesorero solo puede entrar a ese módulo.
 const SECCIONES: Record<string, string[]> = {
+  "/admin/tesoreria": ["admin", "tesorero"],
   "/admin": ["admin"],
   "/club": ["club", "admin"],
   "/arbitro": ["arbitro", "arbitro_asistente", "admin"],
@@ -24,6 +27,7 @@ const SECCIONES: Record<string, string[]> = {
 
 function panelDelRol(role: string): string {
   if (role === "admin") return "/admin/dashboard";
+  if (role === "tesorero") return "/admin/tesoreria/movimientos";
   if (role === "club") return "/club/dashboard";
   if (role === "arbitro" || role === "arbitro_asistente") return "/arbitro/dashboard";
   return "/login";

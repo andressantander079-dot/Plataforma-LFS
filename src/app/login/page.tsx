@@ -53,6 +53,8 @@ export default function LoginPage() {
       const role = profile.role;
       if (role === "admin") {
         router.push("/admin/dashboard");
+      } else if (role === "tesorero") {
+        router.push("/admin/tesoreria/movimientos");
       } else if (role === "arbitro" || role === "arbitro_asistente") {
         router.push("/arbitro/dashboard");
       } else if (role === "club") {
