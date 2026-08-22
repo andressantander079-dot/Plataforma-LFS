@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { createLfsAdminClient } from "@/lib/infrastructure/supabase/admin";
-import { estadoCargo, TIPOS_CARGO_MANUALES } from "@/lib/core/tesoreria/money";
+import {
+  estadoCargo,
+  TIPOS_CARGO_MANUALES,
+  CATEGORIAS_GASTO,
+} from "@/lib/core/tesoreria/money";
 
 /**
  * TESORERÍA LFS — Acciones de servidor (Paso 8A)
@@ -49,6 +53,8 @@ function revalidarTesoreria() {
   revalidatePath("/admin/tesoreria");
   revalidatePath("/admin/tesoreria/movimientos");
   revalidatePath("/admin/tesoreria/configuracion");
+  revalidatePath("/admin/tesoreria/gastos");
+  revalidatePath("/admin/tesoreria/reportes");
   revalidatePath("/club/finanzas");
   revalidatePath("/club/dashboard");
 }
@@ -505,6 +511,155 @@ export async function obtenerUrlComprobante(path: string) {
     .createSignedUrl(path, 600);
   if (error || !data?.signedUrl) return { error: "No se pudo abrir el comprobante." };
   return { url: data.signedUrl };
+}
+
+// ============================================================================
+// GASTOS DE LA LIGA (Paso 8B)
+// ============================================================================
+
+/** La tesorería registra un gasto (o devolución a un club). */
+export async function registrarGasto(formData: FormData) {
+  const { supabase, user } = await requireTesoreria();
+
+  const categoria = formData.get("categoria") as string;
+  const concepto = (formData.get("concepto") as string)?.trim();
+  const monto = Number(formData.get("monto"));
+  const fechaRaw = (formData.get("fecha") as string)?.trim();
+  const clubId = (formData.get("club_id") as string) || null;
+  const archivo = formData.get("comprobante") as File | null;
+
+  if (!CATEGORIAS_GASTO.includes(categoria)) {
+    return { error: "Categoría inválida." };
+  }
+  if (!concepto) return { error: "El concepto es obligatorio." };
+  if (!Number.isFinite(monto) || monto <= 0) {
+    return { error: "El monto debe ser mayor a cero." };
+  }
+  const fecha = fechaRaw ? new Date(fechaRaw + "T12:00:00") : new Date();
+  if (isNaN(fecha.getTime())) return { error: "Fecha inválida." };
+
+  // Una devolución tiene que indicar a qué club se le devolvió
+  if (categoria === "devoluciones" && !clubId) {
+    return { error: "En una devolución tenés que elegir el club." };
+  }
+
+  if (await mesCerrado(supabase, fecha)) {
+    return { error: "Ese mes está cerrado. Pedile al administrador que lo reabra." };
+  }
+
+  let comprobantePath: string | null = null;
+  if (archivo && archivo.size > 0) {
+    if (archivo.size > 5 * 1024 * 1024) {
+      return { error: "El comprobante no puede pesar más de 5 MB." };
+    }
+    const ext = archivo.name.split(".").pop()?.toLowerCase() ?? "jpg";
+    comprobantePath = `gastos/${crypto.randomUUID()}.${ext}`;
+    const { error: errorSubida } = await supabase.storage
+      .from("comprobantes-tesoreria")
+      .upload(comprobantePath, archivo, { contentType: archivo.type });
+    if (errorSubida) return { error: "No se pudo subir el comprobante." };
+  }
+
+  const { error } = await supabase.from("treasury_expenses").insert({
+    categoria,
+    concepto,
+    monto,
+    fecha: fecha.toISOString().slice(0, 10),
+    club_id: clubId,
+    comprobante_path: comprobantePath,
+    creado_por: user.id,
+  });
+
+  if (error) return { error: "No se pudo registrar el gasto." };
+  revalidarTesoreria();
+  return { ok: true };
+}
+
+/** Anular un gasto: queda el registro con motivo. SOLO admin. */
+export async function anularGasto(gastoId: string, motivo: string) {
+  const { supabase, user } = await requireAdminTesoreria();
+
+  if (!motivo?.trim()) return { error: "El motivo de la anulación es obligatorio." };
+
+  const { data: gasto } = await supabase
+    .from("treasury_expenses")
+    .select("fecha, anulado_at")
+    .eq("id", gastoId)
+    .single();
+  if (!gasto) return { error: "El gasto no existe." };
+  if (gasto.anulado_at) return { error: "El gasto ya estaba anulado." };
+
+  if (await mesCerrado(supabase, new Date(gasto.fecha + "T12:00:00"))) {
+    return { error: "Ese gasto pertenece a un mes cerrado. Reabrilo primero." };
+  }
+
+  const { error } = await supabase
+    .from("treasury_expenses")
+    .update({
+      anulado_motivo: motivo.trim(),
+      anulado_por: user.id,
+      anulado_at: new Date().toISOString(),
+    })
+    .eq("id", gastoId);
+
+  if (error) return { error: "No se pudo anular el gasto." };
+  revalidarTesoreria();
+  return { ok: true };
+}
+
+// ============================================================================
+// CIERRE DE CAJA MENSUAL (Paso 8B)
+// El tesorero cierra; solo el admin reabre (con motivo registrado).
+// ============================================================================
+
+export async function cerrarMes(anio: number, mes: number) {
+  const { supabase, user } = await requireTesoreria();
+
+  const { data: existente } = await supabase
+    .from("treasury_cierres")
+    .select("anio, mes, reabierto_at")
+    .eq("anio", anio)
+    .eq("mes", mes)
+    .maybeSingle();
+
+  if (existente && !existente.reabierto_at) {
+    return { error: "Ese mes ya está cerrado." };
+  }
+
+  const { error } = await supabase.from("treasury_cierres").upsert({
+    anio,
+    mes,
+    cerrado_por: user.id,
+    cerrado_at: new Date().toISOString(),
+    reabierto_por: null,
+    reabierto_at: null,
+    reapertura_motivo: null,
+  });
+
+  if (error) return { error: "No se pudo cerrar el mes." };
+  revalidarTesoreria();
+  return { ok: true };
+}
+
+export async function reabrirMes(anio: number, mes: number, motivo: string) {
+  const { supabase, user } = await requireAdminTesoreria();
+
+  if (!motivo?.trim()) return { error: "El motivo de la reapertura es obligatorio." };
+
+  const { error } = await supabase
+    .from("treasury_cierres")
+    .update({
+      reabierto_por: user.id,
+      reabierto_at: new Date().toISOString(),
+      reapertura_motivo: motivo.trim(),
+    })
+    .eq("anio", anio)
+    .eq("mes", mes)
+    .is("reabierto_at", null);
+
+  if (error) return { error: "No se pudo reabrir el mes." };
+  revalidarTesoreria();
+  return { ok: true };
 }
 
 /** Anula la multa que nació de un evento de planilla eliminado. */

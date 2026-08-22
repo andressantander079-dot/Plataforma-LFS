@@ -2,18 +2,20 @@
 
 import { useState, useTransition } from "react";
 import { Ban, Loader2 } from "lucide-react";
-import { anularCargo, anularPago } from "@/lib/actions/tesoreria.actions";
+import { anularCargo, anularGasto, anularPago } from "@/lib/actions/tesoreria.actions";
 
 /**
  * Anulación con motivo (solo admin): queda el registro, nada se borra.
- * Sirve para cargos y para pagos aprobados cargados por error.
+ * Sirve para cargos, pagos aprobados cargados por error y gastos.
  */
+const NOMBRE_TIPO = { cargo: "el cargo", pago: "el pago", gasto: "el gasto" } as const;
+
 export function BotonAnular({
   tipo,
   id,
   descripcion,
 }: {
-  tipo: "cargo" | "pago";
+  tipo: "cargo" | "pago" | "gasto";
   id: string;
   descripcion: string;
 }) {
@@ -27,13 +29,17 @@ export function BotonAnular({
         disabled={pendiente}
         onClick={() => {
           const motivo = window.prompt(
-            `¿Anular ${tipo === "cargo" ? "el cargo" : "el pago"} "${descripcion}"?\nQueda registrado con tu nombre. Motivo (obligatorio):`
+            `¿Anular ${NOMBRE_TIPO[tipo]} "${descripcion}"?\nQueda registrado con tu nombre. Motivo (obligatorio):`
           );
           if (!motivo) return;
           setError(null);
           startTransition(async () => {
             const res =
-              tipo === "cargo" ? await anularCargo(id, motivo) : await anularPago(id, motivo);
+              tipo === "cargo"
+                ? await anularCargo(id, motivo)
+                : tipo === "pago"
+                  ? await anularPago(id, motivo)
+                  : await anularGasto(id, motivo);
             if (res.error) setError(res.error);
           });
         }}

@@ -106,3 +106,16 @@ export const METODO_PAGO_UI: Record<string, string> = {
   transferencia: "Transferencia",
   deposito: "Depósito bancario",
 };
+
+/** Etiquetas legibles para las categorías de gasto de la liga. */
+export const CATEGORIA_GASTO_UI: Record<string, string> = {
+  canchas: "Alquiler de canchas",
+  arbitros: "Árbitros",
+  indumentaria: "Indumentaria",
+  pelotas: "Pelotas y material",
+  administracion: "Administración",
+  devoluciones: "Devolución a un club",
+  otros: "Otros gastos",
+};
+
+export const CATEGORIAS_GASTO = Object.keys(CATEGORIA_GASTO_UI);

@@ -6,8 +6,10 @@ import {
   Settings,
   Clock,
   TrendingUp,
+  TrendingDown,
   AlertTriangle,
   ArrowRight,
+  BarChart3,
 } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { estadoCargo, formatoPesos } from "@/lib/core/tesoreria/money";
@@ -136,6 +138,32 @@ export default async function TesoreriaPanel() {
             <p className="font-bold text-sm text-[#1A2A44]">Movimientos</p>
             <p className="text-[11px] text-slate-500">
               Aprobar comprobantes, cargar cuotas y ver la deuda de cada club.
+            </p>
+          </div>
+          <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-[#F97316] transition" />
+        </Link>
+        <Link
+          href="/admin/tesoreria/gastos"
+          className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:border-[#F97316] transition flex items-center gap-3 group"
+        >
+          <TrendingDown className="w-6 h-6 text-[#F97316]" />
+          <div className="flex-1">
+            <p className="font-bold text-sm text-[#1A2A44]">Gastos</p>
+            <p className="text-[11px] text-slate-500">
+              Canchas, árbitros, material y devoluciones a clubes.
+            </p>
+          </div>
+          <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-[#F97316] transition" />
+        </Link>
+        <Link
+          href="/admin/tesoreria/reportes"
+          className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:border-[#F97316] transition flex items-center gap-3 group"
+        >
+          <BarChart3 className="w-6 h-6 text-[#F97316]" />
+          <div className="flex-1">
+            <p className="font-bold text-sm text-[#1A2A44]">Reportes</p>
+            <p className="text-[11px] text-slate-500">
+              Morosos, recaudación mensual, resumen por torneo y cierre de caja.
             </p>
           </div>
           <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-[#F97316] transition" />
