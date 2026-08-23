@@ -30,7 +30,7 @@ export default function AdminLayout({
     { name: "Competencias", href: "/admin/competencias", icon: Trophy },
     { name: "Equipos (Clubes)", href: "/admin/equipos", icon: Users },
     { name: "Tesorería", href: "/admin/tesoreria/movimientos", icon: Wallet },
-    { name: "Trámites", href: "/admin/tramites/pendientes", icon: ClipboardList },
+    { name: "Trámites", href: "/admin/tramites", icon: ClipboardList },
     { name: "Colegio de Árbitros", href: "/admin/colegiodearbitros", icon: ShieldCheck },
     { name: "Tribunal de Disciplina", href: "/admin/tribunal/sanciones", icon: Scale },
     { name: "Mensajería", href: "/admin/mensajeria", icon: MessageSquare },

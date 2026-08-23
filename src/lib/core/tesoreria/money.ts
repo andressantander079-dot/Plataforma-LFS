@@ -90,6 +90,7 @@ export const TIPO_CARGO_UI: Record<string, string> = {
   multa_roja: "Multa · tarjeta roja",
   multa_wo: "Multa · W.O.",
   multa_acumulacion_amarillas: "Multa · acumulación de amarillas",
+  derecho_pase: "Derecho de pase",
   otro: "Otro cargo",
 };
 

@@ -47,6 +47,7 @@ export default async function TesoreriaConfiguracion() {
             fine_wo: Number(settings?.fine_wo ?? 0),
             fine_yellow_accum: Number(settings?.fine_yellow_accum ?? 0),
             late_fee_percent: Number(settings?.late_fee_percent ?? 0),
+            transfer_fee: Number(settings?.transfer_fee ?? 0),
             league_legal_name: settings?.league_legal_name ?? null,
             league_cuit: settings?.league_cuit ?? null,
             league_address: settings?.league_address ?? null,

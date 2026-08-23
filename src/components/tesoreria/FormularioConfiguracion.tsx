@@ -9,6 +9,7 @@ export interface SettingsUI {
   fine_wo: number;
   fine_yellow_accum: number;
   late_fee_percent: number;
+  transfer_fee: number;
   league_legal_name: string | null;
   league_cuit: string | null;
   league_address: string | null;
@@ -85,6 +86,27 @@ export function FormularioConfiguracion({
             />
           </label>
         </div>
+      </fieldset>
+
+      <fieldset className="border border-slate-200 rounded-xl p-4">
+        <legend className="text-xs font-bold text-[#1A2A44] px-1">
+          Derecho de pase ($) — 0 = no cobra
+        </legend>
+        <label className={`${CLASE_LABEL} max-w-xs`}>
+          Monto por pase efectivo
+          <input
+            name="transfer_fee"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue={settings.transfer_fee}
+            disabled={soloLectura}
+            className={CLASE_INPUT}
+          />
+        </label>
+        <p className="text-[10px] text-slate-400 mt-2">
+          Cuando un pase queda efectivo, se genera solo el cargo al club destino (módulo Trámites).
+        </p>
       </fieldset>
 
       <fieldset className="border border-slate-200 rounded-xl p-4">

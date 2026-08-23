@@ -98,6 +98,7 @@ export async function guardarConfiguracionTesoreria(formData: FormData) {
       fine_wo: num("fine_wo"),
       fine_yellow_accum: num("fine_yellow_accum"),
       late_fee_percent: num("late_fee_percent"),
+      transfer_fee: num("transfer_fee"),
       league_legal_name: (formData.get("league_legal_name") as string)?.trim() || null,
       league_cuit: (formData.get("league_cuit") as string)?.trim() || null,
       league_address: (formData.get("league_address") as string)?.trim() || null,

@@ -6,7 +6,7 @@ import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria";
 import { estadoCargo, formatoPesos } from "@/lib/core/tesoreria/money";
 import {
   Users, Phone, KeyRound, UserRound, ShieldCheck, AlertCircle,
-  CheckCircle, XCircle, Mail, MessageSquare, Wallet,
+  CheckCircle, XCircle, Mail, MessageSquare, Wallet, ClipboardList,
 } from "lucide-react";
 
 /**
@@ -139,6 +139,13 @@ export default async function ClubDashboard() {
     }
   }
 
+  // AVISO DE PASES (Paso 9): trámites esperando el dictamen de ESTE club
+  const { count: pasesPorDictaminar } = await supabase
+    .from("transfers")
+    .select("id", { count: "exact", head: true })
+    .eq("from_club_id", clubData.id)
+    .eq("status", "4_CLUB_B_DECISION");
+
   // Todos los usuarios autorizados de este club
   const { data: usuarios } = await supabase
     .from("profiles")
@@ -209,6 +216,26 @@ export default async function ClubDashboard() {
               </p>
               <p className={`text-[11px] ${hayVencidos ? "text-red-600" : "text-orange-600"}`}>
                 Tocá acá para ver tu estado de cuenta e informar el pago.
+              </p>
+            </div>
+          </Link>
+        )}
+
+        {/* Aviso de pases: trámites esperando el dictamen del club */}
+        {(pasesPorDictaminar ?? 0) > 0 && (
+          <Link
+            href="/club/tramites"
+            className="rounded-2xl border p-4 flex items-center gap-3 shadow-sm transition hover:shadow-md bg-purple-50 border-purple-200"
+          >
+            <ClipboardList className="w-6 h-6 shrink-0 text-purple-600" />
+            <div className="flex-1">
+              <p className="font-bold text-sm text-purple-800">
+                {pasesPorDictaminar === 1
+                  ? "Hay 1 pase esperando tu dictamen"
+                  : `Hay ${pasesPorDictaminar} pases esperando tu dictamen`}
+              </p>
+              <p className="text-[11px] text-purple-600">
+                Otro club pidió jugadores tuyos. Tocá acá para aprobar o rechazar.
               </p>
             </div>
           </Link>
