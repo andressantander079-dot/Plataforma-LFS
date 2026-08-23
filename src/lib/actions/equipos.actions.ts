@@ -3,6 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { createLfsAdminClient } from "@/lib/infrastructure/supabase/admin";
+import {
+  anioDeFecha,
+  validarCategoriasPorAnio,
+  type CategoriaConRango,
+} from "@/lib/core/rules/jugadoresRules";
 
 /**
  * ACCIONES DEL MÓDULO EQUIPOS (Pasos 2 y 4)
@@ -235,6 +240,7 @@ export async function inscribirJugador(
   const first_name = texto(formData, "first_name");
   const last_name = texto(formData, "last_name");
   const dni = texto(formData, "dni");
+  const fecha_nacimiento = texto(formData, "fecha_nacimiento");
   const categoryIds = formData.getAll("categoryIds").map(String);
 
   if (!first_name || !last_name || !dni) {
@@ -243,6 +249,19 @@ export async function inscribirJugador(
   if (!/^\d{6,10}$/.test(dni)) {
     return { ok: false, error: "El DNI debe tener entre 6 y 10 números, sin puntos ni letras." };
   }
+
+  // Fecha de nacimiento OBLIGATORIA (Paso 9B): define la categoría por año
+  if (!fecha_nacimiento) {
+    return { ok: false, error: "Cargá la fecha de nacimiento: define en qué categoría juega." };
+  }
+  const nac = new Date(`${fecha_nacimiento}T00:00:00`);
+  if (Number.isNaN(nac.getTime()) || !anioDeFecha(fecha_nacimiento)) {
+    return { ok: false, error: "La fecha de nacimiento no es válida." };
+  }
+  if (nac > new Date()) {
+    return { ok: false, error: "La fecha de nacimiento no puede ser futura." };
+  }
+
   if (categoryIds.length === 0) {
     return { ok: false, error: "Asigná al menos una categoría al jugador." };
   }
@@ -250,10 +269,26 @@ export async function inscribirJugador(
   const { supabase, error } = await requireAdmin();
   if (error) return { ok: false, error };
 
+  // Validación por año de nacimiento (Paso 9B): si las categorías tienen
+  // rango de años configurado, la categoría base tiene que ser la de su año
+  // (puede jugar también en categorías MAYORES, nunca en menores).
+  const { data: categorias } = await supabase
+    .from("categories")
+    .select("id, name, level_hierarchy, anio_desde, anio_hasta");
+
+  const validacionAnio = validarCategoriasPorAnio(
+    anioDeFecha(fecha_nacimiento) as number,
+    categoryIds,
+    (categorias ?? []) as CategoriaConRango[]
+  );
+  if (!validacionAnio.ok) {
+    return { ok: false, error: validacionAnio.error };
+  }
+
   // 1. Crear el jugador (el DNI es único en toda la liga)
   const { data: player, error: playerError } = await supabase
     .from("players")
-    .insert({ dni, first_name, last_name })
+    .insert({ dni, first_name, last_name, fecha_nacimiento })
     .select("id")
     .single();
 

@@ -5,6 +5,7 @@ import {
   type JugadorPlantel,
   type UsuarioClub,
 } from "@/components/admin/PlantelInteractivo";
+import { FormularioPaseHistorico } from "@/components/pases/FormularioPaseHistorico";
 
 /**
  * PLANTEL DE UN CLUB (server component)
@@ -98,14 +99,25 @@ export default async function ClubPlantelAdmin({
     a.fullName.localeCompare(b.fullName)
   );
 
+  // 6. Todos los clubes (para la carga de pases históricos en papel)
+  const { data: todosLosClubes } = await supabase
+    .from("clubs")
+    .select("id, name")
+    .order("name");
+
   return (
-    <PlantelInteractivo
-      clubId={club.id}
-      clubName={club.name}
-      jugadores={jugadores}
-      categories={(categories ?? []) as Category[]}
-      usuarios={(usuarios ?? []) as UsuarioClub[]}
-      abrirPanelInicial={nuevo === "1"}
-    />
+    <div className="flex flex-col gap-6">
+      <PlantelInteractivo
+        clubId={club.id}
+        clubName={club.name}
+        jugadores={jugadores}
+        categories={(categories ?? []) as Category[]}
+        usuarios={(usuarios ?? []) as UsuarioClub[]}
+        abrirPanelInicial={nuevo === "1"}
+      />
+
+      {/* Paso 9B: registro de pases históricos en papel (solo carga, no altera nada) */}
+      <FormularioPaseHistorico clubes={(todosLosClubes ?? []) as { id: string; name: string }[]} />
+    </div>
   );
 }

@@ -130,3 +130,121 @@ export function aQuienLeToca(estado: EstadoPase): string {
       return "nadie, el trámite terminó";
   }
 }
+
+// ---------------------------------------------------------------------------
+// TIPOS DE PASE (Paso 9B): definitivo o préstamo con retorno
+// ---------------------------------------------------------------------------
+
+export type TipoPase = "definitivo" | "prestamo";
+
+export const TIPO_PASE_UI: Record<TipoPase, { label: string; className: string }> = {
+  definitivo: {
+    label: "Definitivo",
+    className: "bg-green-100 text-green-700",
+  },
+  prestamo: {
+    label: "Préstamo",
+    className: "bg-amber-100 text-amber-700",
+  },
+};
+
+/**
+ * El préstamo EXIGE fecha de retorno y tiene que ser FUTURA.
+ * El definitivo no lleva fecha de retorno.
+ */
+export function fechaRetornoValida(
+  fechaRetorno: string | null | undefined,
+  tipo: TipoPase,
+  hoy: Date = new Date()
+): { ok: boolean; error?: string } {
+  if (tipo === "definitivo") return { ok: true };
+  if (!fechaRetorno) {
+    return { ok: false, error: "El préstamo necesita una fecha de retorno." };
+  }
+  const fecha = new Date(`${fechaRetorno}T00:00:00`);
+  if (Number.isNaN(fecha.getTime())) {
+    return { ok: false, error: "La fecha de retorno no es válida." };
+  }
+  const inicioHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  if (fecha <= inicioHoy) {
+    return { ok: false, error: "La fecha de retorno tiene que ser posterior a hoy." };
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENTO DE CONFORMIDAD (Paso 9B): texto legal que el jugador lee y
+// acepta en la pantalla de firma. Función pura → se prueba con vitest.
+// ---------------------------------------------------------------------------
+
+export interface DatosConsentimiento {
+  jugador: string;
+  dni: string;
+  clubOrigen: string;
+  clubDestino: string;
+  tipo: TipoPase;
+  fechaRetorno?: string | null; // ISO (YYYY-MM-DD), solo préstamo
+  torneo?: string | null; // nombre del torneo, solo préstamo por torneo
+}
+
+/** Nombre formal del trámite para el documento. */
+export function nombreTramite(tipo: TipoPase): string {
+  return tipo === "prestamo" ? "PASE A PRÉSTAMO" : "PASE DEFINITIVO";
+}
+
+function fechaLegible(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("es-AR");
+}
+
+/** Documento completo de conformidad de transferencia. */
+export function generarTextoConsentimiento(d: DatosConsentimiento): string {
+  const lineas: string[] = [
+    "DOCUMENTO DE CONFORMIDAD DE TRANSFERENCIA DE JUGADOR/A",
+    "Liga de Fútsal de Ushuaia (LFS)",
+    "",
+    `En el día de la fecha, el/la jugador/a ${d.jugador}, DNI N° ${d.dni}, confirma que realizará el trámite de ${nombreTramite(d.tipo)} desde el club ${d.clubOrigen} hacia el club ${d.clubDestino}.`,
+  ];
+
+  if (d.tipo === "prestamo") {
+    if (d.torneo) {
+      lineas.push(`El préstamo se realiza en el marco del torneo ${d.torneo}.`);
+    }
+    if (d.fechaRetorno) {
+      lineas.push(
+        `La fecha de retorno acordada es el ${fechaLegible(d.fechaRetorno)}: llegada esa fecha, el/la jugador/a retornará automáticamente al club ${d.clubOrigen}.`
+      );
+    }
+  }
+
+  lineas.push(
+    "",
+    "El/La jugador/a declara:",
+    "1. Que realiza esta transferencia de manera libre y voluntaria, en pleno conocimiento de los clubes involucrados y de las condiciones del trámite.",
+    "2. Que los datos consignados en este documento son auténticos y que la firma dibujada y la foto del documento de identidad adjuntas le pertenecen.",
+    "3. Que la presente conformidad registrada de forma digital tiene plena validez ante la Liga de Fútsal de Ushuaia."
+  );
+
+  if (d.tipo === "prestamo") {
+    lineas.push(
+      "4. Que conoce y acepta que, al vencimiento del préstamo, retornará automáticamente a su club de origen, y que la rescisión anticipada solo puede realizarla el club destino con el recargo que establece la liga."
+    );
+  }
+
+  return lineas.join("\n");
+}
+
+/** Bloque de autorización de la madre, padre o tutor/a (menores de 18). */
+export function generarTextoTutor(t: {
+  parentesco: string;
+  nombre: string;
+  apellido: string;
+  dni: string;
+}): string {
+  return [
+    "AUTORIZACIÓN DE MADRE, PADRE O TUTOR/A",
+    "",
+    `Yo, ${t.apellido}, ${t.nombre}, DNI N° ${t.dni}, en mi carácter de ${t.parentesco} del/de la jugador/a menor de edad, AUTORIZO la transferencia declarada en este documento y dejo constancia de mi conformidad con mi firma dibujada y la foto de mi documento de identidad.`,
+  ].join("\n");
+}

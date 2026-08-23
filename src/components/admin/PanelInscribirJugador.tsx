@@ -186,6 +186,23 @@ export function PanelInscribirJugador({
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-slate-700">
+                Fecha de nacimiento (obligatoria)
+              </label>
+              <input
+                type="date"
+                name="fecha_nacimiento"
+                required
+                max={new Date().toISOString().slice(0, 10)}
+                className={inputClass}
+              />
+              <p className="text-[10px] text-slate-400">
+                Define en qué categoría juega: el sistema valida el año de
+                nacimiento contra los rangos que configura la liga y avisa si
+                corresponde otra categoría.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-slate-700">
                 Categoría Base (por Edad)
               </label>
               <select
