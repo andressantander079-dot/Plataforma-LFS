@@ -82,33 +82,17 @@ export default async function ClubPartidos() {
     .toUpperCase();
 
   return (
-    <main className="min-h-screen bg-slate-100">
-      {/* Barra superior (mismo estilo que el panel del club) */}
-      <header className="bg-[#1A2A44] text-white">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 bg-[#F97316] rounded-full flex items-center justify-center font-bold text-white shadow-md shrink-0">
-              {iniciales}
-            </div>
-            <div className="min-w-0">
-              <h1 className="font-serif text-lg font-black truncate">{club.name}</h1>
-              <p className="text-slate-400 text-[11px]">Partidos y Competencias</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <Link
-              href="/club/dashboard"
-              className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-[#F97316] transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">Volver al panel</span>
-            </Link>
-            <div className="w-36 hidden sm:block"><BotonCerrarSesion /></div>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 flex flex-col gap-6">
+    <div className="max-w-5xl mx-auto flex flex-col gap-6">
+      {/* Encabezado */}
+      <div className="border-b border-slate-200 pb-4">
+        <h2 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
+          <Trophy className="w-7 h-7 text-[#F97316]" />
+          Partidos y Competencias
+        </h2>
+        <p className="text-slate-500 text-xs mt-0.5">
+          Cronogramas, resultados, plantillas oficiales y tablas de posiciones de tus equipos.
+        </p>
+      </div>
         {(torneos ?? []).length === 0 && (
           <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center shadow-sm flex flex-col items-center gap-2">
             <Trophy className="w-8 h-8 text-slate-300" />
@@ -337,7 +321,6 @@ export default async function ClubPartidos() {
             );
           })
         )}
-      </div>
-    </main>
+    </div>
   );
 }

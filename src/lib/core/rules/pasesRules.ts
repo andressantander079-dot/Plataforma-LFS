@@ -1,8 +1,187 @@
 /**
- * REGLAS DE PASES Y TRANSFERENCIAS (Paso 9)
- * Máquina de estados del circuito de pases + credencial de firma de 72 hs.
- * Todo son funciones puras: se prueban con vitest sin tocar la base.
+ * REGLAS DE PASES Y TRANSFERENCIAS (LFS Sprint Plan v3.0)
+ * Máquina de estados del circuito de pases, esquemas Zod, contratos de respuesta y
+ * validación de elegibilidad de categorías por año de nacimiento.
+ * Todo son funciones puras: se prueban con vitest sin tocar la base de datos.
  */
+
+import { z } from "zod";
+
+// ============================================================================
+// 1. CONTRATO ESTANDARIZADO DE RESPUESTA DE SERVER ACTIONS
+// ============================================================================
+
+export type ActionResponse<T = unknown> = {
+  success: boolean;
+  data?: T;
+  error?: string;
+  code?: string;
+};
+
+// ============================================================================
+// 2. ESQUEMAS ZOD DE VALIDACIÓN
+// ============================================================================
+
+/** Inscripción de nuevo jugador o libre desde el panel del club */
+export const InscripcionJugadorInputSchema = z.object({
+  player_id: z.string().uuid().optional(),
+  dni: z
+    .string()
+    .trim()
+    .regex(/^\d{6,10}$/, "El DNI debe contener entre 6 y 10 dígitos numéricos sin puntos ni letras."),
+  first_name: z.string().trim().min(2, "El nombre debe tener al menos 2 caracteres."),
+  last_name: z.string().trim().min(2, "El apellido debe tener al menos 2 caracteres."),
+  fecha_nacimiento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha inválido (YYYY-MM-DD)."),
+  foto_path: z.string().min(1, "La foto de perfil es obligatoria."),
+  category_ids: z.array(z.string().uuid()).min(1, "Debe seleccionar al menos una categoría."),
+});
+
+export type InscripcionJugadorInput = z.infer<typeof InscripcionJugadorInputSchema>;
+
+/** Parámetros generales del módulo de pases (pase_settings) */
+export const PaseSettingsSchema = z
+  .object({
+    tenencia_anios: z.number().int().min(0, "La tenencia no puede ser negativa.").max(5, "Máximo 5 años."),
+    recargo_rescision: z.number().min(0, "El recargo no puede ser negativo."),
+    alerta_trabado_horas: z.number().int().min(1).max(720),
+    cancelacion_trabado_horas: z.number().int().min(1).max(720),
+    aviso_retorno_horas: z.number().int().min(1).max(720),
+  })
+  .refine((data) => data.cancelacion_trabado_horas > data.alerta_trabado_horas, {
+    message: "La cancelación automática tiene que ser posterior a la alerta de pase trabado.",
+    path: ["cancelacion_trabado_horas"],
+  });
+
+export type PaseSettingsInput = z.infer<typeof PaseSettingsSchema>;
+
+/** Rango de años de nacimiento por categoría (categories) */
+export const RangoCategoriaSchema = z
+  .object({
+    id: z.string().uuid(),
+    anio_desde: z.number().int().min(1950).max(new Date().getFullYear()).nullable(),
+    anio_hasta: z.number().int().min(1950).max(new Date().getFullYear()).nullable(),
+  })
+  .refine(
+    (data) => {
+      if (data.anio_desde === null && data.anio_hasta === null) return true;
+      if (data.anio_desde !== null && data.anio_hasta !== null) {
+        return data.anio_desde <= data.anio_hasta;
+      }
+      return false;
+    },
+    { message: "Complete ambos años (desde <= hasta) o deje ambos campos vacíos." }
+  );
+
+export type RangoCategoriaInput = z.infer<typeof RangoCategoriaSchema>;
+
+/** Tarifas y derechos de pase (transfer_fees) */
+export const TransferFeeInputSchema = z.object({
+  category_id: z.string().uuid("Seleccione una categoría válida."),
+  competition_id: z.string().uuid().nullable().optional(),
+  tipo: z.enum(["definitivo", "prestamo"] as const),
+  monto: z.number().min(0, "El monto no puede ser negativo."),
+});
+
+export type TransferFeeInput = z.infer<typeof TransferFeeInputSchema>;
+
+/** Ventanas de mercado (transfer_windows) */
+export const TransferWindowInputSchema = z
+  .object({
+    nombre: z.string().trim().min(3, "El nombre de la ventana debe tener al menos 3 caracteres."),
+    fecha_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de inicio inválida."),
+    fecha_hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de fin inválida."),
+  })
+  .refine((data) => data.fecha_hasta >= data.fecha_desde, {
+    message: "La fecha de fin no puede ser anterior a la de inicio.",
+    path: ["fecha_hasta"],
+  });
+
+export type TransferWindowInput = z.infer<typeof TransferWindowInputSchema>;
+
+// ============================================================================
+// 3. VALIDACIÓN DE ELEGIBILIDAD DE CATEGORÍAS (JUGAR PARA ARRIBA)
+// ============================================================================
+
+export interface CategoriaElegibilidad {
+  id: string;
+  name: string;
+  level_hierarchy: number;
+  anio_desde: number | null;
+  anio_hasta: number | null;
+}
+
+/**
+ * Valida si un jugador puede inscribirse en las categorías seleccionadas:
+ * 1. Encuentra la categoría sugerida (base) según el año de nacimiento.
+ * 2. Si no hay rango configurado, todas las categorías son permitidas.
+ * 3. Bloquea estrictamente categorías inferiores a la sugerida.
+ * 4. Exige obligatoriamente la inclusión de la categoría base si hay categorías seleccionadas.
+ * 5. Permite sumar divisiones superiores ("jugar para arriba").
+ */
+export function validarElegibilidadCategoria(
+  birthYear: number,
+  selectedCategoryIds: string[],
+  allCategories: CategoriaElegibilidad[]
+): {
+  valid: boolean;
+  error?: string;
+  sugerida?: CategoriaElegibilidad;
+  permitidasIds: string[];
+} {
+  const sugerida = allCategories.find(
+    (c) =>
+      c.anio_desde !== null &&
+      c.anio_hasta !== null &&
+      birthYear >= c.anio_desde &&
+      birthYear <= c.anio_hasta
+  );
+
+  // Si no hay rango configurado para ese año, todas son elegibles
+  if (!sugerida) {
+    return {
+      valid: true,
+      permitidasIds: allCategories.map((c) => c.id),
+    };
+  }
+
+  // Permitidas: la sugerida (base) + todas las de jerarquía superior
+  const permitidas = allCategories.filter((c) => c.level_hierarchy >= sugerida.level_hierarchy);
+  const permitidasIds = permitidas.map((c) => c.id);
+
+  const seleccionadas = allCategories.filter((c) => selectedCategoryIds.includes(c.id));
+
+  // 1. Bloqueo estricto de categorías inferiores
+  const inferior = seleccionadas.find((c) => c.level_hierarchy < sugerida.level_hierarchy);
+  if (inferior) {
+    return {
+      valid: false,
+      error: `Por su año de nacimiento (${birthYear}), el jugador no puede competir en ${inferior.name}. Su categoría base es ${sugerida.name}.`,
+      sugerida,
+      permitidasIds,
+    };
+  }
+
+  // 2. Obligatoriedad de incluir la categoría base
+  const tieneBase = selectedCategoryIds.includes(sugerida.id);
+  if (!tieneBase && selectedCategoryIds.length > 0) {
+    return {
+      valid: false,
+      error: `Por su año de nacimiento (${birthYear}), debe incluir obligatoriamente su categoría base (${sugerida.name}). Opcionalmente puede sumar categorías mayores.`,
+      sugerida,
+      permitidasIds,
+    };
+  }
+
+  return {
+    valid: true,
+    sugerida,
+    permitidasIds,
+  };
+}
+
+// ============================================================================
+// 4. MÁQUINA DE ESTADOS Y CREDENCIALES TEMPORALES (Paso 9)
+// ============================================================================
 
 /** Verifica si las credenciales temporales generadas para la firma digital siguen activas (límite de 72 horas). */
 export function isCredentialActive(approvedAt: string, ttlHours = 72): boolean {
@@ -12,10 +191,6 @@ export function isCredentialActive(approvedAt: string, ttlHours = 72): boolean {
   const hoursPassed = (now - approvalTime) / (1000 * 60 * 60);
   return hoursPassed <= ttlHours;
 }
-
-// ---------------------------------------------------------------------------
-// MÁQUINA DE ESTADOS DEL PASE
-// ---------------------------------------------------------------------------
 
 export type EstadoPase =
   | "1_INIT_CLUB_A"
@@ -81,11 +256,6 @@ export const ESTADO_PASE_UI: Record<
   },
 };
 
-/**
- * Pasos del stepper visual. El circuito tiene 5 momentos; los estados
- * 1/2 comparten el paso 0 y 3/4 comparten el paso 1.
- * Estados terminales "malos" (8/9) devuelven -1: el stepper se muestra tachado.
- */
 export const PASOS_CIRCUITO = [
   "Solicitud y revisión de la liga",
   "Dictamen del club de origen",
@@ -109,11 +279,10 @@ export function progresoPase(estado: string): number {
     case "7_COMPLETED":
       return 4;
     default:
-      return -1; // rechazado / cancelado
+      return -1;
   }
 }
 
-/** ¿Qué acción le toca a cada rol en este estado? (para los textos de ayuda) */
 export function aQuienLeToca(estado: EstadoPase): string {
   switch (estado) {
     case "1_INIT_CLUB_A":
@@ -131,9 +300,9 @@ export function aQuienLeToca(estado: EstadoPase): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// TIPOS DE PASE (Paso 9B): definitivo o préstamo con retorno
-// ---------------------------------------------------------------------------
+// ============================================================================
+// 5. TIPOS DE PASE Y DOCUMENTO DE CONFORMIDAD (Paso 9B)
+// ============================================================================
 
 export type TipoPase = "definitivo" | "prestamo";
 
@@ -148,10 +317,6 @@ export const TIPO_PASE_UI: Record<TipoPase, { label: string; className: string }
   },
 };
 
-/**
- * El préstamo EXIGE fecha de retorno y tiene que ser FUTURA.
- * El definitivo no lleva fecha de retorno.
- */
 export function fechaRetornoValida(
   fechaRetorno: string | null | undefined,
   tipo: TipoPase,
@@ -172,22 +337,16 @@ export function fechaRetornoValida(
   return { ok: true };
 }
 
-// ---------------------------------------------------------------------------
-// DOCUMENTO DE CONFORMIDAD (Paso 9B): texto legal que el jugador lee y
-// acepta en la pantalla de firma. Función pura → se prueba con vitest.
-// ---------------------------------------------------------------------------
-
 export interface DatosConsentimiento {
   jugador: string;
   dni: string;
   clubOrigen: string;
   clubDestino: string;
   tipo: TipoPase;
-  fechaRetorno?: string | null; // ISO (YYYY-MM-DD), solo préstamo
-  torneo?: string | null; // nombre del torneo, solo préstamo por torneo
+  fechaRetorno?: string | null;
+  torneo?: string | null;
 }
 
-/** Nombre formal del trámite para el documento. */
 export function nombreTramite(tipo: TipoPase): string {
   return tipo === "prestamo" ? "PASE A PRÉSTAMO" : "PASE DEFINITIVO";
 }
@@ -198,7 +357,6 @@ function fechaLegible(iso: string): string {
   return d.toLocaleDateString("es-AR");
 }
 
-/** Documento completo de conformidad de transferencia. */
 export function generarTextoConsentimiento(d: DatosConsentimiento): string {
   const lineas: string[] = [
     "DOCUMENTO DE CONFORMIDAD DE TRANSFERENCIA DE JUGADOR/A",
@@ -235,7 +393,6 @@ export function generarTextoConsentimiento(d: DatosConsentimiento): string {
   return lineas.join("\n");
 }
 
-/** Bloque de autorización de la madre, padre o tutor/a (menores de 18). */
 export function generarTextoTutor(t: {
   parentesco: string;
   nombre: string;

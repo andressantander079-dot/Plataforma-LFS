@@ -8,6 +8,11 @@ import {
   validarCategoriasPorAnio,
   type CategoriaConRango,
 } from "@/lib/core/rules/jugadoresRules";
+import {
+  InscripcionJugadorInputSchema,
+  type ActionResponse,
+  type InscripcionJugadorInput,
+} from "@/lib/core/rules/pasesRules";
 
 /**
  * ACCIONES DEL MÓDULO EQUIPOS (Pasos 2 y 4)
@@ -322,4 +327,123 @@ export async function inscribirJugador(
 
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
   return { ok: true };
+}
+
+export async function actualizarConfiguracionClub(
+  clubId: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const phone = String(formData.get("phone") ?? "").trim();
+  const camiseta = String(formData.get("camiseta") ?? "").trim();
+  const camiseta_alternativa = String(formData.get("camiseta_alternativa") ?? "").trim();
+
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { ok: false, error: "No hay sesión activa." };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, club_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) return { ok: false, error: "Perfil no encontrado." };
+
+  if (profile.role !== "admin" && profile.club_id !== clubId) {
+    return { ok: false, error: "No tenés permiso para editar la configuración de este club." };
+  }
+
+  const { data: club } = await supabase
+    .from("clubs")
+    .select("metadata")
+    .eq("id", clubId)
+    .single();
+
+  const currentMeta = (club?.metadata as Record<string, unknown>) ?? {};
+  const metadata = {
+    ...currentMeta,
+    telefono_delegado: phone,
+    color_camiseta: camiseta,
+    color_camiseta_alternativa: camiseta_alternativa,
+  };
+
+  const adminClient = createLfsAdminClient();
+  const { error: updateError } = await adminClient
+    .from("clubs")
+    .update({ metadata })
+    .eq("id", clubId);
+
+  if (updateError) {
+    return { ok: false, error: `Error al actualizar la configuración: ${updateError.message}` };
+  }
+
+  revalidatePath("/club/configuracion");
+  revalidatePath("/club/dashboard");
+  return { ok: true };
+}
+
+/**
+ * Inscripción de jugador desde el portal del club (Zero-Trust via RPC)
+ */
+export async function inscribirJugadorClubAction(
+  input: InscripcionJugadorInput
+): Promise<ActionResponse<{ player_id: string }>> {
+  const parseResult = InscripcionJugadorInputSchema.safeParse(input);
+  if (!parseResult.success) {
+    return {
+      success: false,
+      error: parseResult.error.issues[0]?.message ?? "Datos de inscripción inválidos.",
+    };
+  }
+
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "No hay sesión activa." };
+  }
+
+  const playerId = input.player_id ?? crypto.randomUUID();
+
+  const { data, error } = await supabase.rpc("inscribir_jugador_club", {
+    p_player_id: playerId,
+    p_dni: input.dni,
+    p_first_name: input.first_name,
+    p_last_name: input.last_name,
+    p_fecha_nacimiento: input.fecha_nacimiento,
+    p_foto_path: input.foto_path,
+    p_category_ids: input.category_ids,
+  });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  const res = data as {
+    success: boolean;
+    error?: string;
+    code?: string;
+    player_id?: string;
+    message?: string;
+  } | null;
+
+  if (!res || !res.success) {
+    return {
+      success: false,
+      error: res?.error ?? "Error al procesar la inscripción del jugador.",
+      code: res?.code,
+    };
+  }
+
+  revalidatePath("/club/planteles");
+  revalidatePath("/admin/equipos");
+  return {
+    success: true,
+    data: { player_id: res.player_id ?? playerId },
+  };
 }

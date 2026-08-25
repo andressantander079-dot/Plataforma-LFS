@@ -7,6 +7,15 @@ import {
   esEstadoTerminal,
   fechaRetornoValida,
   type TipoPase,
+  type ActionResponse,
+  PaseSettingsSchema,
+  RangoCategoriaSchema,
+  TransferFeeInputSchema,
+  TransferWindowInputSchema,
+  type PaseSettingsInput,
+  type RangoCategoriaInput,
+  type TransferFeeInput,
+  type TransferWindowInput,
 } from "@/lib/core/rules/pasesRules";
 
 /**
@@ -1059,71 +1068,44 @@ export async function procesarAutomaticosPases() {
 // CONFIGURACIÓN DEL MÓDULO (9B, solo admin)
 // ============================================================================
 
-export async function guardarPaseSettings(formData: FormData) {
+export async function guardarPaseSettings(formData: FormData): Promise<ActionResponse> {
   const { supabase } = await requireAdminPases();
 
-  const tenencia = Number(formData.get("tenencia_anios"));
-  const recargo = Number(formData.get("recargo_rescision"));
-  const alerta = Number(formData.get("alerta_trabado_horas"));
-  const cancelacion = Number(formData.get("cancelacion_trabado_horas"));
-  const avisoRetorno = Number(formData.get("aviso_retorno_horas"));
+  const parseResult = PaseSettingsSchema.safeParse({
+    tenencia_anios: Number(formData.get("tenencia_anios")),
+    recargo_rescision: Number(formData.get("recargo_rescision")),
+    alerta_trabado_horas: Number(formData.get("alerta_trabado_horas")),
+    cancelacion_trabado_horas: Number(formData.get("cancelacion_trabado_horas")),
+    aviso_retorno_horas: Number(formData.get("aviso_retorno_horas")),
+  });
 
-  if (!Number.isInteger(tenencia) || tenencia < 0 || tenencia > 5) {
-    return { error: "La tenencia tiene que ser un número de años entre 0 y 5." };
-  }
-  if (Number.isNaN(recargo) || recargo < 0) {
-    return { error: "El recargo por rescisión no puede ser negativo." };
-  }
-  for (const [nombre, valor] of [
-    ["alerta", alerta],
-    ["cancelación", cancelacion],
-    ["aviso de retorno", avisoRetorno],
-  ] as const) {
-    if (!Number.isInteger(valor) || valor < 1 || valor > 720) {
-      return { error: `Las horas de ${nombre} tienen que ser un número entre 1 y 720.` };
-    }
-  }
-  if (cancelacion <= alerta) {
-    return { error: "La cancelación automática tiene que ser más tarde que la alerta (ej: alerta 48 hs, cancelación 72 hs)." };
+  if (!parseResult.success) {
+    return { success: false, error: parseResult.error.issues[0]?.message ?? "Datos inválidos." };
   }
 
   const { error } = await supabase
     .from("pase_settings")
     .update({
-      tenencia_anios: tenencia,
-      recargo_rescision: recargo,
-      alerta_trabado_horas: alerta,
-      cancelacion_trabado_horas: cancelacion,
-      aviso_retorno_horas: avisoRetorno,
+      ...parseResult.data,
       updated_at: new Date().toISOString(),
     })
     .eq("id", 1);
 
-  if (error) return { error: "No se pudo guardar la configuración." };
+  if (error) return { success: false, error: "No se pudo guardar la configuración." };
   revalidarPases();
-  return { ok: true };
+  return { success: true };
 }
 
 /** Rangos de años de nacimiento por categoría (se editan una vez al año). */
 export async function guardarRangosCategorias(
   rangos: { id: string; anio_desde: number | null; anio_hasta: number | null }[]
-) {
+): Promise<ActionResponse> {
   const { supabase } = await requireAdminPases();
-  const anioActual = new Date().getFullYear();
 
   for (const r of rangos) {
-    const tieneDesde = r.anio_desde !== null && Number.isInteger(r.anio_desde);
-    const tieneHasta = r.anio_hasta !== null && Number.isInteger(r.anio_hasta);
-    if (tieneDesde !== tieneHasta) {
-      return { error: "Completá los dos años del rango (desde y hasta) o dejá los dos vacíos." };
-    }
-    if (tieneDesde && tieneHasta) {
-      if ((r.anio_desde as number) < 1950 || (r.anio_hasta as number) > anioActual) {
-        return { error: `Los años tienen que estar entre 1950 y ${anioActual}.` };
-      }
-      if ((r.anio_desde as number) > (r.anio_hasta as number)) {
-        return { error: "El año “desde” no puede ser mayor que el año “hasta”." };
-      }
+    const parseResult = RangoCategoriaSchema.safeParse(r);
+    if (!parseResult.success) {
+      return { success: false, error: parseResult.error.issues[0]?.message ?? "Rango de categoría inválido." };
     }
   }
 
@@ -1132,15 +1114,15 @@ export async function guardarRangosCategorias(
       .from("categories")
       .update({ anio_desde: r.anio_desde, anio_hasta: r.anio_hasta })
       .eq("id", r.id);
-    if (error) return { error: "No se pudieron guardar los rangos de las categorías." };
+    if (error) return { success: false, error: "No se pudieron guardar los rangos de las categorías." };
   }
 
   revalidarPases();
-  return { ok: true };
+  return { success: true };
 }
 
 /** Derecho de pase por categoría/tipo (y opcionalmente por torneo). */
-export async function guardarFeePase(formData: FormData) {
+export async function guardarFeePase(formData: FormData): Promise<ActionResponse> {
   const { supabase } = await requireAdminPases();
 
   const categoryId = String(formData.get("category_id") ?? "");
@@ -1148,12 +1130,15 @@ export async function guardarFeePase(formData: FormData) {
   const competitionId = String(formData.get("competition_id") ?? "") || null;
   const monto = Number(formData.get("monto"));
 
-  if (!categoryId) return { error: "Elegí la categoría." };
-  if (tipo !== "definitivo" && tipo !== "prestamo") {
-    return { error: "Elegí el tipo de pase (definitivo o préstamo)." };
-  }
-  if (Number.isNaN(monto) || monto < 0) {
-    return { error: "El monto no puede ser negativo (0 = no se cobra)." };
+  const parseResult = TransferFeeInputSchema.safeParse({
+    category_id: categoryId,
+    tipo,
+    competition_id: competitionId,
+    monto,
+  });
+
+  if (!parseResult.success) {
+    return { success: false, error: parseResult.error.issues[0]?.message ?? "Datos de arancel inválidos." };
   }
 
   // Upsert manual: actualizar la regla existente o crear una nueva
@@ -1167,7 +1152,7 @@ export async function guardarFeePase(formData: FormData) {
     : consulta.is("competition_id", null);
   const { data: actualizadas, error: errorUpdate } = await consulta.select("id");
 
-  if (errorUpdate) return { error: "No se pudo guardar la regla de derecho de pase." };
+  if (errorUpdate) return { success: false, error: "No se pudo guardar la regla de derecho de pase." };
 
   if (!actualizadas || actualizadas.length === 0) {
     const { error } = await supabase.from("transfer_fees").insert({
@@ -1176,20 +1161,20 @@ export async function guardarFeePase(formData: FormData) {
       tipo,
       monto,
     });
-    if (error) return { error: "Ya existe una regla para esa combinación de categoría, tipo y torneo." };
+    if (error) return { success: false, error: "Ya existe una regla para esa combinación de categoría, tipo y torneo." };
   }
 
   revalidarPases();
-  return { ok: true };
+  return { success: true };
 }
 
-export async function eliminarFeePase(feeId: string) {
+export async function eliminarFeePase(feeId: string): Promise<ActionResponse> {
   const { supabase } = await requireAdminPases();
 
   const { error } = await supabase.from("transfer_fees").delete().eq("id", feeId);
-  if (error) return { error: "No se pudo eliminar la regla." };
+  if (error) return { success: false, error: "No se pudo eliminar la regla." };
   revalidarPases();
-  return { ok: true };
+  return { success: true };
 }
 
 // ============================================================================
@@ -1415,15 +1400,22 @@ export async function bajaJugador(playerId: string, motivo: string) {
 // VENTANAS DE MERCADO (solo admin)
 // ============================================================================
 
-export async function crearVentana(formData: FormData) {
+export async function crearVentana(formData: FormData): Promise<ActionResponse> {
   const { supabase, user } = await requireAdminPases();
 
   const nombre = (formData.get("nombre") as string)?.trim();
   const desde = (formData.get("fecha_desde") as string)?.trim();
   const hasta = (formData.get("fecha_hasta") as string)?.trim();
-  if (!nombre) return { error: "Ponele un nombre a la ventana (ej: Mercado de Verano 2026)." };
-  if (!desde || !hasta) return { error: "Faltan las fechas." };
-  if (hasta < desde) return { error: "La fecha de fin no puede ser anterior a la de inicio." };
+
+  const parseResult = TransferWindowInputSchema.safeParse({
+    nombre,
+    fecha_desde: desde,
+    fecha_hasta: hasta,
+  });
+
+  if (!parseResult.success) {
+    return { success: false, error: parseResult.error.issues[0]?.message ?? "Datos de ventana inválidos." };
+  }
 
   const { error } = await supabase.from("transfer_windows").insert({
     nombre,
@@ -1432,12 +1424,12 @@ export async function crearVentana(formData: FormData) {
     creado_por: user.id,
   });
 
-  if (error) return { error: "No se pudo crear la ventana." };
+  if (error) return { success: false, error: "No se pudo crear la ventana." };
   revalidarPases();
-  return { ok: true };
+  return { success: true };
 }
 
-export async function eliminarVentana(ventanaId: string) {
+export async function eliminarVentana(ventanaId: string): Promise<ActionResponse> {
   const { supabase } = await requireAdminPases();
 
   const { error } = await supabase
@@ -1445,7 +1437,54 @@ export async function eliminarVentana(ventanaId: string) {
     .delete()
     .eq("id", ventanaId);
 
-  if (error) return { error: "No se pudo eliminar la ventana." };
+  if (error) return { success: false, error: "No se pudo eliminar la ventana." };
   revalidarPases();
-  return { ok: true };
+  return { success: true };
+}
+
+/** Pre-chequeo asíncrono de DNI con detección de club actual */
+export async function buscarJugadorDniAction(dni: string): Promise<ActionResponse<{
+  encontrado: boolean;
+  player?: { id: string; first_name: string; last_name: string; dni: string; fecha_nacimiento?: string | null; foto_path?: string | null };
+  clubActual?: { id: string; name: string } | null;
+  perteneceAlMismoClub: boolean;
+}>> {
+  const { supabase, clubId } = await requireClubPases();
+  const dniLimpio = dni.trim();
+  if (!dniLimpio || !/^\d{6,10}$/.test(dniLimpio)) {
+    return { success: false, error: "El DNI debe tener entre 6 y 10 dígitos numéricos." };
+  }
+
+  const { data: player } = await supabase
+    .from("players")
+    .select("id, first_name, last_name, dni, fecha_nacimiento, foto_path")
+    .eq("dni", dniLimpio)
+    .maybeSingle();
+
+  if (!player) {
+    return {
+      success: true,
+      data: { encontrado: false, perteneceAlMismoClub: false },
+    };
+  }
+
+  const { data: catRows } = await supabase
+    .from("player_categories")
+    .select("club_id, clubs(id, name)")
+    .eq("player_id", player.id)
+    .limit(1)
+    .maybeSingle();
+
+  const clubActual = (catRows?.clubs as unknown as { id: string; name: string } | null) ?? null;
+  const perteneceAlMismoClub = Boolean(clubActual && clubId && clubActual.id === clubId);
+
+  return {
+    success: true,
+    data: {
+      encontrado: true,
+      player,
+      clubActual,
+      perteneceAlMismoClub,
+    },
+  };
 }

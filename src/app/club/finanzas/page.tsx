@@ -84,23 +84,16 @@ export default async function ClubFinanzas() {
     .reduce((s, c) => s + c.estado.saldo, 0);
 
   return (
-    <main className="min-h-screen bg-slate-100">
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <Link
-            href="/club/dashboard"
-            className="text-xs font-bold text-slate-400 hover:text-[#F97316] transition flex items-center gap-1"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" /> Volver al panel
-          </Link>
-          <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
-            <Wallet className="w-7 h-7 text-[#F97316]" />
-            Estado de cuenta
-          </h1>
-          <p className="text-slate-500 text-xs">
-            Cuotas, inscripciones y multas de tu club ante la liga.
-          </p>
-        </div>
+    <div className="max-w-4xl mx-auto flex flex-col gap-6">
+      <div className="flex flex-col gap-1 border-b border-slate-200 pb-4">
+        <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
+          <Wallet className="w-7 h-7 text-[#F97316]" />
+          Estado de Cuenta
+        </h1>
+        <p className="text-slate-500 text-xs">
+          Cuotas, inscripciones y multas del club ante la liga de futsal.
+        </p>
+      </div>
 
         {/* Resumen */}
         <div className="grid grid-cols-2 gap-3">
@@ -239,7 +232,6 @@ export default async function ClubFinanzas() {
             </ul>
           )}
         </section>
-      </div>
-    </main>
+    </div>
   );
 }

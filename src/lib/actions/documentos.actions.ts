@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { createLfsAdminClient } from "@/lib/infrastructure/supabase/admin";
 
 /**
- * ACCIONES DE DOCUMENTOS DE JUGADORES (Paso 3)
+ * ACCIONES DE DOCUMENTOS DE JUGADORES (Paso 3 y Adaptación Clubes)
  * Subida y lectura segura de archivos en Supabase Storage.
- * Bucket privado "documentos-jugadores" — solo rol admin.
+ * Bucket privado "documentos-jugadores".
+ * Permite acceso a administradores de la liga y delegados del propio club del jugador.
  */
 
 const BUCKET = "documentos-jugadores";
@@ -23,27 +25,53 @@ type TipoDocumento = (typeof TIPOS_VALIDOS)[number];
 
 type ActionResult = { ok: boolean; error?: string; url?: string };
 
-async function requireAdmin() {
+// Valida si el usuario actual es admin o si es delegado del club del jugador
+async function requireAdminOrClubForPlayer(playerId: string) {
   const supabase = await createLfsServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { supabase, error: "No hay sesión activa. Iniciá sesión nuevamente." };
+    return { error: "No hay sesión activa. Iniciá sesión nuevamente.", isAdmin: false, clubId: null };
   }
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, club_id")
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "admin") {
-    return { supabase, error: "Solo el administrador puede gestionar documentos." };
+  if (!profile) {
+    return { error: "Perfil de usuario no encontrado.", isAdmin: false, clubId: null };
   }
 
-  return { supabase, error: null };
+  if (profile.role === "admin") {
+    return { error: null, isAdmin: true, clubId: null };
+  }
+
+  if (profile.role === "club") {
+    if (!profile.club_id) {
+      return { error: "El usuario no tiene ningún club asignado.", isAdmin: false, clubId: null };
+    }
+
+    // Verificar si el jugador pertenece al club del delegado
+    const { data: belongs } = await supabase
+      .from("player_categories")
+      .select("club_id")
+      .eq("player_id", playerId)
+      .eq("club_id", profile.club_id)
+      .limit(1)
+      .maybeSingle();
+
+    if (!belongs) {
+      return { error: "Este jugador no pertenece a tu club.", isAdmin: false, clubId: null };
+    }
+
+    return { error: null, isAdmin: false, clubId: profile.club_id };
+  }
+
+  return { error: "Operación no autorizada.", isAdmin: false, clubId: null };
 }
 
 // ---------- SUBIR DOCUMENTO ----------
@@ -70,13 +98,19 @@ export async function subirDocumento(
     return { ok: false, error: "Formato no permitido. Solo PDF, JPG o PNG." };
   }
 
-  const { supabase, error } = await requireAdmin();
-  if (error) return { ok: false, error };
+  const check = await requireAdminOrClubForPlayer(playerId);
+  if (check.error) return { ok: false, error: check.error };
 
-  // 1. Subir el archivo al bucket (upsert: si ya existía, lo reemplaza)
+  // Si es del club, debe coincidir con el clubId del jugador
+  if (!check.isAdmin && check.clubId !== clubId) {
+    return { ok: false, error: "No tenés permiso para subir archivos a este club." };
+  }
+
+  const adminClient = createLfsAdminClient();
   const ruta = `${clubId}/${playerId}/${tipo}.${extension}`;
 
-  const { error: uploadError } = await supabase.storage
+  // Subir el archivo usando el cliente administrador (bypass RLS)
+  const { error: uploadError } = await adminClient.storage
     .from(BUCKET)
     .upload(ruta, archivo, { upsert: true, contentType: archivo.type });
 
@@ -84,8 +118,8 @@ export async function subirDocumento(
     return { ok: false, error: `Error al subir el archivo: ${uploadError.message}` };
   }
 
-  // 2. Marcar el documento en la ficha del jugador (guardamos la ruta)
-  const { data: player } = await supabase
+  // Marcar el documento en la ficha del jugador
+  const { data: player } = await adminClient
     .from("players")
     .select("documents")
     .eq("id", playerId)
@@ -96,7 +130,7 @@ export async function subirDocumento(
     [tipo]: ruta,
   };
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = await adminClient
     .from("players")
     .update({ documents })
     .eq("id", playerId);
@@ -109,18 +143,25 @@ export async function subirDocumento(
   }
 
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
+  revalidatePath(`/club/planteles`);
   return { ok: true };
 }
 
 // ---------- OBTENER ENLACE PARA VER DOCUMENTO ----------
-// Genera un enlace firmado que vence en 60 segundos (bucket privado)
 export async function obtenerUrlDocumento(ruta: string): Promise<ActionResult> {
   if (!ruta) return { ok: false, error: "Documento inexistente." };
 
-  const { supabase, error } = await requireAdmin();
-  if (error) return { ok: false, error };
+  const parts = ruta.split("/");
+  const playerId = parts[1];
+  if (!playerId) {
+    return { ok: false, error: "Ruta de archivo incorrecta." };
+  }
 
-  const { data, error: signError } = await supabase.storage
+  const check = await requireAdminOrClubForPlayer(playerId);
+  if (check.error) return { ok: false, error: check.error };
+
+  const adminClient = createLfsAdminClient();
+  const { data, error: signError } = await adminClient.storage
     .from(BUCKET)
     .createSignedUrl(ruta, 60);
 
