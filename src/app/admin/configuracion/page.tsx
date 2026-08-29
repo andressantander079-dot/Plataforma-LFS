@@ -1,39 +1,51 @@
-"use client";
+import { redirect } from "next/navigation";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { obtenerConfiguracionAdminCompleta } from "@/lib/actions/configuracion.actions";
+import { PanelConfiguracion } from "@/components/admin/configuracion/PanelConfiguracion";
+import { DEFAULT_LEAGUE_CONFIG } from "@/lib/core/rules/configuracionRules";
 
-import { Settings, Save } from "lucide-react";
+export const metadata = {
+  title: "Panel de Configuración General • Admin LFS",
+  description: "Configuración integral de la Liga de Fútsal de Ushuaia (identidad, categorías, sponsors, sedes y disciplina).",
+};
 
-export default function ConfiguracionAdmin() {
+export const dynamic = "force-dynamic";
+
+export default async function ConfiguracionAdminPage() {
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (profile?.role !== "admin") {
+    redirect("/club/dashboard");
+  }
+
+  const res = await obtenerConfiguracionAdminCompleta();
+
+  const initialConfig = res.data?.config || DEFAULT_LEAGUE_CONFIG;
+  const initialSponsors = res.data?.sponsors || [];
+  const initialCategories = res.data?.categories || [];
+  const initialVenues = res.data?.venues || [];
+  const initialAuditLogs = res.data?.auditLogs || [];
+
   return (
-    <div className="flex flex-col gap-6 max-w-2xl mx-auto">
-      <div className="border-b pb-4">
-        <h2 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
-          <Settings className="w-7 h-7 text-[#F97316]" />
-          Configuración General
-        </h2>
-        <p className="text-slate-500 text-xs mt-0.5">Parámetros del sistema de puntos, tarjetas y seguridad.</p>
-      </div>
-
-      <form onSubmit={(e) => { e.preventDefault(); alert("Configuración guardada."); }} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col gap-5">
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-bold text-slate-700">Nombre de la Asociación</label>
-          <input type="text" defaultValue="Liga de Fútsal de Ushuaia" className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-semibold text-[#1A2A44] focus:outline-none" />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-slate-700">Acumulación Amarillas (Suspensión)</label>
-            <input type="number" defaultValue={5} className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-semibold text-[#1A2A44] focus:outline-none" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-slate-700">Multa por Tarjeta Roja Directa (ARS)</label>
-            <input type="number" defaultValue={8500} className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-semibold text-[#1A2A44] focus:outline-none" />
-          </div>
-        </div>
-
-        <button type="submit" className="w-full mt-2 py-2.5 bg-[#F97316] text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5">
-          <Save className="w-4 h-4" /> Guardar Cambios
-        </button>
-      </form>
-    </div>
+    <PanelConfiguracion
+      initialConfig={initialConfig}
+      initialSponsors={initialSponsors}
+      initialCategories={initialCategories}
+      initialVenues={initialVenues}
+      initialAuditLogs={initialAuditLogs}
+    />
   );
 }

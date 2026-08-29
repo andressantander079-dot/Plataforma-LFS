@@ -11,6 +11,13 @@ export default function AdminGlobalCatchAll() {
   const parentModule = slug ? slug[0] : "";
   const subAction = slug && slug.length > 1 ? slug[1] : "";
 
+  // Redirigir configuración al nuevo panel oficial
+  if (parentModule === "configuracion") {
+    if (typeof window !== "undefined") {
+      router.replace("/admin/configuracion");
+    }
+  }
+
   // Estados de Configuración y Tribunal
   const [sanctions, setSanctions] = useState([
     { id: "s1", player: "Bautista Roldán", club: "Club Camioneros", offense: "Doble tarjeta amarilla", sanction: "1 Fecha", status: "Activa" }

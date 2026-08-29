@@ -34,7 +34,7 @@ export default function AdminLayout({
     { name: "Colegio de Árbitros", href: "/admin/colegiodearbitros", icon: ShieldCheck },
     { name: "Tribunal de Disciplina", href: "/admin/tribunal/sanciones", icon: Scale },
     { name: "Mensajería", href: "/admin/mensajeria", icon: MessageSquare },
-    { name: "Configuración", href: "/admin/configuracion/general", icon: Settings },
+    { name: "Configuración", href: "/admin/configuracion", icon: Settings },
   ];
 
   return (

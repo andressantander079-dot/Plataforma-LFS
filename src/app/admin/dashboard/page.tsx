@@ -25,7 +25,7 @@ export default function AdminDashboard() {
     { name: "Mensajería", href: "/admin/mensajeria/bandeja", icon: MessageSquare, desc: "Bandeja y archivado PIN 9090", badge: "14 Ptes" },
     { name: "Reglamento Oficial", href: "/admin/reglamento", icon: FileText, desc: "Subida de PDF e historial de versiones", badge: "v2026" },
     { name: "Agenda", href: "/admin/agenda", icon: Calendar, desc: "Calendario institucional y recordatorios", badge: "3 Ev." },
-    { name: "Configuración General", href: "/admin/configuracion", icon: Settings, desc: "General, branding, puntos y tarjetas", badge: "General" },
+    { name: "Configuración General", href: "/admin/configuracion", icon: Settings, desc: "Identidad, categorías, sponsors, sedes y reglas", badge: "Oficial" },
     { name: "Estadísticas Globales", href: "/admin/estadisticas", icon: BarChart3, desc: "Rendimiento global de la liga", badge: "Top 8" },
   ];
 
