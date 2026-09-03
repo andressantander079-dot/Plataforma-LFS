@@ -1,35 +1,60 @@
-# Estado y Roadmap — Plataforma LFS
+# Estado del proyecto y roadmap — Plataforma LFS
 
-## Estado Actual del Proyecto (Paso por Paso)
+> **ACTUALIZAR ESTE ARCHIVO AL TERMINAR CADA PASO** (fecha, qué se entregó, qué quedó pendiente).
 
-- **Paso 1 y 2: Esquema Base y Roles**
-  - Autenticación con Supabase (`profiles`), roles: `admin`, `club`, `arbitro`, `arbitro_asistente`.
-  - Tablas: `clubs`, `players`, `categories`, `player_categories`, `matches`, `audit_logs`.
-- **Paso 3: Documentación y Storage**
-  - Bucket privado `documentos-jugadores` para fichas médicas, DNI y fotos.
-- **Paso 4: Clubes y Representantes**
-  - Alta de clubes, presidentes, tesoreros y usuarios de acceso vinculados.
-- **Paso 5: Mensajería Interna Oficial**
-  - Bandeja de entrada entre federación y clubes con PIN de seguridad y confirmaciones de lectura.
-- **Paso 6: Competencias, Fixtures y Sedes**
-  - Creación de torneos (liga, eliminación, grupos + playoffs), generación automática de fixture, canchas (`venues`).
-- **Paso 7A, 7B y 7C: Planillas, Disciplina y Playoffs**
-  - Planilla digital de partido táctil con registro de goles, tarjetas, firmas y cálculo automático de tablas.
-  - Sanciones automáticas por tarjetas y cómputo de fechas. Cruces eliminatorios de playoffs.
-- **Paso 8A y 8B: Módulo de Tesorería**
-  - Gestión contable federativa: ingresos, egresos, aranceles, multas automáticas con PIN 00T00.
-- **Paso 9, 9B y 9C: Pases, Transferencias e Inscripción de Planteles**
-  - Circuito de pases federativos en 7 estados, reglas de tenencia y rescisión (`pasesRules.ts`).
-  - RPC `inscribir_jugador_club` con validación estricta de edad y categoría base (`jugadoresRules.ts`).
-- **Hotfix de Seguridad (Agosto 2026)**
-  - Cierre de políticas RLS públicas en DNI y teléfonos; validación estricta de planteles por club.
-- **Paso 10: Panel de Configuración Integral (Completado)**
-  - Identidad institucional, logotipo oficial con subida a bucket `league-assets`.
-  - Gestión de categorías con Soft-Deactivate (`is_active`) y preservación histórica.
-  - Patrocinadores comerciales (`sponsors`) por tiers (Main, Platino, Oro, etc.).
-  - Canchas y escenarios deportivos de Ushuaia.
-  - Parámetros de juego, disciplina y libro de pases con Singleton `league_settings`.
+Última actualización: 2026-09-03 (Paso 10B entregado).
+Último commit visto: `de85c159` — "Paso 9B Parte 1…" (2026-08-23). (Después el usuario commiteó Pasos 10 y 10B desde su PC.)
+Avance estimado para lanzar: **~80%**.
 
-## Roadmap / Siguientes Pasos
-- Puesta a punto final del portal público y páginas de fixture/posiciones con datos de sponsors dinámicos.
-- Conexión de reportes imprimibles en PDF para actas y fichas de club.
+## Pasos entregados (todos verificados: tsc + tests + build)
+
+| Paso | Contenido | Estado |
+|---|---|---|
+| 1 | Login y roles | ✅ en repo |
+| 2 | Equipos y jugadores (base) | ✅ |
+| 3 | Panel lateral y documentos (storage) | ✅ |
+| 4 | Representantes, credenciales y panel del club | ✅ |
+| 5 | Mensajería premium | ✅ |
+| 6 | Competencias (núcleo: torneos, equipos, fixture) | ✅ |
+| 7A | Planilla digital del árbitro | ✅ |
+| 7B | Goleadores y disciplina (suspensiones por torneo) | ✅ |
+| 7C | Llaves de playoff (4 formatos) | ✅ |
+| Hotfix | Seguridad: proxy por rol + RLS + helpers | ✅ |
+| 8A | Tesorería: cargos, pagos, recibos, multas, rol tesorero | ✅ |
+| 8B | Tesorería: gastos, reportes, export Excel, cierre de caja | ✅ |
+| 9 | Pases: circuito completo, ventanas, firma online simple, nro de pase | ✅ |
+| 9B Parte 1 | Motor pases premium: préstamos, firma profesional (documento+canvas+foto DNI+tutor), deudas, derecho de pase por categoría/torneo, históricos en papel, tenencia, trámites automáticos, inscripción con fecha de nacimiento y validación por año | ✅ (commit `de85c159`) |
+| 10 | Club autogestión: `club/planteles` real, `inscribirJugador` doble rol (admin/club dueño), policies INSERT club en players/player_categories, ficha jugador (foto + fecha) | ✅ (verificado en producción por el usuario) |
+| 10B | Planteles por categoría (`club_planteles` + RLS + backfill), inscripción SOLO en plantel existente, regla de edad ESTRICTA (solo su categoría por año; ni más alta ni más chica — planilla de juego sigue permitiendo citar para arriba), 4 documentos obligatorios al inscribir (DNI, CEMAD médico, CEMAD autorización, comprobante federación — bucket `documentos-jugadores` con policies club), foto obligatoria, fix `bodySizeLimit: 30mb` en next.config.ts (error "Body exceeded 1 MB"), ficha con checklist de docs, admin gestiona planteles (`GestionPlanteles`) y solo inscribe en categorías con plantel | ✅ entregado 2026-09-03 |
+
+Tests actuales: **81 en verde** (6 archivos en `src/tests/`).
+
+## Mocks pendientes (pantallas con datos falsos)
+
+- Admin: dashboard, agenda, reglamento, estadísticas, configuración, tribunal, designaciones, colegio de árbitros.
+- Club: estadísticas, configuración, descargas.
+- Público: noticias, descargas.
+- Árbitro: dashboard, calendario, perfil, estadísticas, mensajería.
+
+## Roadmap acordado
+
+1. **Paso 10 — El club se autogestiona**: ✅ hecho (10 + 10B, ver arriba).
+2. **Paso 11 — 9B Parte 2** (SIGUIENTE): página admin config de pases (rangos + fees + settings), trámites admin con alertas de trabados/mercado con montos, `/transferencias` pública estilo FIFA (sin montos), historial del jugador con períodos, página admin pase/[id] con evidencia de firma (`!!meta.tutor` por trampa unknown), club/tramites con rescisión.
+3. **Paso 12** — Convertir mocks admin/públicos en reales (priorizar tribunal con datos de disciplina 7B, noticias, descargas).
+4. **Paso 13** — Deploy a producción (Vercel + Supabase prod, env vars, datos iniciales).
+
+## Desconexiones detectadas (análisis 2026-09-02)
+
+- ~~El club no podía cargar jugadores~~ → RESUELTO en Pasos 10/10B (acción doble rol + RLS club + pantalla real con planteles).
+- Componentes 9B sin pantalla aún (config, evidencia, foto) → Paso 11.
+- SQLs 8B/9/9B no commiteados en el repo → quedan en la raíz del proyecto del usuario (los incluye su commit del Paso 10).
+
+## Reglas de negocio confirmadas por el usuario (NO cambiar sin preguntar)
+
+- **Inscripción al plantel = estricta por año de nacimiento**: ni categoría más grande ni más chica. Validado en `validarCategoriasPorAnio` (jugadoresRules.ts) con tests.
+- **Planilla de juego = flexible**: se puede citar jugadores de categorías inferiores para un partido (GestionPlantelClub NO se tocó).
+- **Documentos obligatorios de inscripción (4)**: DNI, CEMAD médico, CEMAD de autorización, comprobante de pago de federación. Constante `DOCUMENTOS_INSCRIPCION` en jugadoresRules.ts.
+- **Foto obligatoria** al inscribir (≤5MB, imagen).
+- **El DNI es la clave única del jugador** (no hay ID manual).
+- Un plantel solo se elimina si está vacío.
+- `next.config.ts` lleva `experimental.serverActions.bodySizeLimit: "30mb"` — NO borrar (sin esto las subidas >1MB fallan).
