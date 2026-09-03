@@ -12,6 +12,38 @@ export interface CategoriaConRango {
   anio_hasta: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// DOCUMENTOS OBLIGATORIOS DE INSCRIPCIÓN (Paso 10B)
+// Sin estos 4 documentos no se puede inscribir al jugador. Las claves se
+// guardan en players.documents (jsonb) y los archivos en el bucket
+// "documentos-jugadores" con path {clubId}/{playerId}/{clave}.{ext}.
+// ---------------------------------------------------------------------------
+
+export const DOCUMENTOS_INSCRIPCION = [
+  { clave: "dni", nombre: "DNI (foto o escaneo)" },
+  { clave: "cemad_medico", nombre: "CEMAD médico (aptitud física)" },
+  { clave: "cemad_autorizacion", nombre: "CEMAD de autorización" },
+  { clave: "comprobante_federacion", nombre: "Comprobante de pago de federación" },
+] as const;
+
+export type ClaveDocumentoInscripcion = (typeof DOCUMENTOS_INSCRIPCION)[number]["clave"];
+
+/** Cuántos de los documentos obligatorios tiene cargados el jugador (0 a 4). */
+export function contarDocumentosRequeridos(
+  documents: Record<string, string> | null | undefined
+): number {
+  const docs = documents ?? {};
+  return DOCUMENTOS_INSCRIPCION.filter((d) => docs[d.clave]).length;
+}
+
+/** Nombres de los documentos obligatorios que todavía faltan. */
+export function documentosFaltantes(
+  documents: Record<string, string> | null | undefined
+): string[] {
+  const docs = documents ?? {};
+  return DOCUMENTOS_INSCRIPCION.filter((d) => !docs[d.clave]).map((d) => d.nombre);
+}
+
 /** ¿Es menor de 18 años a la fecha de referencia? (sin fecha de nac. → no se sabe → false) */
 export function calcularEsMenor(
   fechaNacimiento: string | null | undefined,
@@ -64,13 +96,12 @@ export function categoriaSugeridaPorAnio(
 }
 
 /**
- * Validación de inscripción por año de nacimiento:
+ * Validación de inscripción por año de nacimiento — REGLA ESTRICTA (Paso 10B):
+ * el jugador juega SOLO en la categoría de su año. Ni una más grande
+ * ("para arriba") ni una más chica.
  *  · Si ninguna categoría tiene rango → no se bloquea nada (ok).
  *  · Si el año cae fuera de todos los rangos → no se bloquea nada (ok).
- *  · La categoría BASE (la de menor nivel jerárquico entre las elegidas)
- *    TIENE que ser la de su año. Si eligió una menor → error con sugerencia
- *    ("Podría jugar en Sub-…"). Si eligió solo mayores → falta la base.
- *  · Base correcta + categorías mayores (jugar "para arriba") → ok.
+ *  · Si alguna categoría elegida no es la de su año → error con sugerencia.
  */
 export function validarCategoriasPorAnio(
   anio: number,
@@ -83,22 +114,13 @@ export function validarCategoriasPorAnio(
   const seleccionadas = categorias.filter((c) => seleccionadasIds.includes(c.id));
   if (seleccionadas.length === 0) return { ok: true }; // lo valida otra regla
 
-  // La base es la de MENOR nivel jerárquico entre las elegidas
-  const base = [...seleccionadas].sort(
-    (a, b) => a.level_hierarchy - b.level_hierarchy
-  )[0];
-
-  if (base.id === sugerida.id) return { ok: true };
-
-  if (base.level_hierarchy < sugerida.level_hierarchy) {
+  const otra = seleccionadas.find((c) => c.id !== sugerida.id);
+  if (otra) {
     return {
       ok: false,
-      error: `Por su año de nacimiento (${anio}), este jugador no puede jugar en ${base.name}. Podría jugar en ${sugerida.name}.`,
+      error: `Por su año de nacimiento (${anio}), este jugador juega en ${sugerida.name}: no puede inscribirse en ${otra.name} (ni en una categoría más grande ni más chica).`,
     };
   }
 
-  return {
-    ok: false,
-    error: `Por su año de nacimiento (${anio}), la categoría base de este jugador es ${sugerida.name}: inscribilo primero ahí y, si querés, también en categorías mayores.`,
-  };
+  return { ok: true };
 }

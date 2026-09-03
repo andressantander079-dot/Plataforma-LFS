@@ -6,6 +6,7 @@ import {
   type UsuarioClub,
 } from "@/components/admin/PlantelInteractivo";
 import { FormularioPaseHistorico } from "@/components/pases/FormularioPaseHistorico";
+import { GestionPlanteles, type PlantelResumen } from "@/components/admin/GestionPlanteles";
 
 /**
  * PLANTEL DE UN CLUB (server component)
@@ -73,6 +74,43 @@ export default async function ClubPlantelAdmin({
     .eq("club_id", id)
     .order("created_at");
 
+  // 4b. Planteles del club (Paso 10B: la inscripción exige plantel existente)
+  const { data: plantelesRows } = await supabase
+    .from("club_planteles")
+    .select("id, category_id, categories ( id, name, level_hierarchy )")
+    .eq("club_id", id);
+
+  // 4c. Cantidad de jugadores por categoría (para saber qué planteles están vacíos)
+  const jugadoresPorCategoriaId = new Map<string, number>();
+  for (const row of (rows ?? []) as unknown as PlayerRow[]) {
+    const catId = row.categories?.id;
+    if (catId) {
+      jugadoresPorCategoriaId.set(catId, (jugadoresPorCategoriaId.get(catId) ?? 0) + 1);
+    }
+  }
+
+  interface PlantelRow {
+    id: string;
+    category_id: string;
+    categories: { id: string; name: string; level_hierarchy: number } | null;
+  }
+
+  const planteles: PlantelResumen[] = ((plantelesRows ?? []) as unknown as PlantelRow[])
+    .filter((p) => p.categories)
+    .map((p) => ({
+      plantelId: p.id,
+      categoryId: p.category_id,
+      categoriaNombre: p.categories!.name,
+      cantidadJugadores: jugadoresPorCategoriaId.get(p.category_id) ?? 0,
+    }))
+    .sort((a, b) => a.categoriaNombre.localeCompare(b.categoriaNombre));
+
+  const idsConPlantel = new Set(planteles.map((p) => p.categoryId));
+  const todasLasCategorias = (categories ?? []) as Category[];
+  const categoriasSinPlantel = todasLasCategorias.filter((c) => !idsConPlantel.has(c.id));
+  // Para inscribir solo se ofrecen categorías con plantel creado
+  const categoriasConPlantel = todasLasCategorias.filter((c) => idsConPlantel.has(c.id));
+
   // 5. Agrupar: un jugador puede aparecer en varias filas (una por categoría)
   const mapa = new Map<string, JugadorPlantel>();
   for (const row of (rows ?? []) as unknown as PlayerRow[]) {
@@ -107,11 +145,18 @@ export default async function ClubPlantelAdmin({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Paso 10B: gestión de planteles (requisito previo a inscribir jugadores) */}
+      <GestionPlanteles
+        clubId={club.id}
+        planteles={planteles}
+        categoriasSinPlantel={categoriasSinPlantel}
+      />
+
       <PlantelInteractivo
         clubId={club.id}
         clubName={club.name}
         jugadores={jugadores}
-        categories={(categories ?? []) as Category[]}
+        categories={categoriasConPlantel}
         usuarios={(usuarios ?? []) as UsuarioClub[]}
         abrirPanelInicial={nuevo === "1"}
       />

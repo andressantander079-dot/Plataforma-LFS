@@ -6,13 +6,9 @@ import { createLfsAdminClient } from "@/lib/infrastructure/supabase/admin";
 import {
   anioDeFecha,
   validarCategoriasPorAnio,
+  DOCUMENTOS_INSCRIPCION,
   type CategoriaConRango,
 } from "@/lib/core/rules/jugadoresRules";
-import {
-  InscripcionJugadorInputSchema,
-  type ActionResponse,
-  type InscripcionJugadorInput,
-} from "@/lib/core/rules/pasesRules";
 
 /**
  * ACCIONES DEL MÓDULO EQUIPOS (Pasos 2 y 4)
@@ -55,6 +51,36 @@ async function requireAdmin() {
 
 function texto(formData: FormData, campo: string): string {
   return String(formData.get(campo) ?? "").trim();
+}
+
+// Verifica sesión y que el usuario sea admin O el club dueño del clubId (Paso 10:
+// el club inscribe sus propios jugadores; la liga sigue pudiendo en cualquier club)
+async function requireAdminOClubDuenio(clubId: string) {
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { supabase, error: "No hay sesión activa. Iniciá sesión nuevamente." };
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, club_id")
+    .eq("id", user.id)
+    .single();
+
+  if (profile?.role === "admin") {
+    return { supabase, error: null };
+  }
+  if (profile?.role === "club" && profile.club_id === clubId) {
+    return { supabase, error: null };
+  }
+  return {
+    supabase,
+    error: "Solo la liga o el propio club pueden inscribir jugadores en este plantel.",
+  };
 }
 
 // Crea el usuario de acceso del club y lo vincula (usa la clave service_role)
@@ -271,12 +297,45 @@ export async function inscribirJugador(
     return { ok: false, error: "Asigná al menos una categoría al jugador." };
   }
 
-  const { supabase, error } = await requireAdmin();
+  // Foto OBLIGATORIA (Paso 10B): es la cara del jugador en planillas y pases
+  const foto = formData.get("foto") as File | null;
+  if (!foto || foto.size === 0) {
+    return { ok: false, error: "Falta la foto del jugador (obligatoria para inscribirlo)." };
+  }
+  if (!foto.type.startsWith("image/")) {
+    return { ok: false, error: "La foto tiene que ser una imagen (JPG, PNG o WebP)." };
+  }
+  if (foto.size > 5 * 1024 * 1024) {
+    return { ok: false, error: "La foto no puede pesar más de 5 MB." };
+  }
+
+  // Documentos OBLIGATORIOS de inscripción (Paso 10B):
+  // DNI + CEMAD médico + CEMAD de autorización + comprobante de federación
+  const documentosArchivos: { clave: string; archivo: File }[] = [];
+  for (const doc of DOCUMENTOS_INSCRIPCION) {
+    const archivo = formData.get(`doc_${doc.clave}`) as File | null;
+    if (!archivo || archivo.size === 0) {
+      return { ok: false, error: `Falta el documento obligatorio: ${doc.nombre}.` };
+    }
+    const esImagen = archivo.type.startsWith("image/");
+    const esPdf = archivo.type === "application/pdf";
+    if (!esImagen && !esPdf) {
+      return { ok: false, error: `El documento "${doc.nombre}" tiene que ser PDF o imagen.` };
+    }
+    if (archivo.size > 5 * 1024 * 1024) {
+      return { ok: false, error: `El documento "${doc.nombre}" no puede pesar más de 5 MB.` };
+    }
+    documentosArchivos.push({ clave: doc.clave, archivo });
+  }
+
+  // Paso 10: la liga inscribe en cualquier club; el club solo en el suyo
+  const { supabase, error } = await requireAdminOClubDuenio(clubId);
   if (error) return { ok: false, error };
 
-  // Validación por año de nacimiento (Paso 9B): si las categorías tienen
-  // rango de años configurado, la categoría base tiene que ser la de su año
-  // (puede jugar también en categorías MAYORES, nunca en menores).
+  // Validación por año de nacimiento — REGLA ESTRICTA (Paso 10B): si las
+  // categorías tienen rango de años configurado, el jugador se inscribe SOLO
+  // en la categoría de su año (ni más grande ni más chica). Jugar "para
+  // arriba" se permite en la planilla del partido, no en la inscripción.
   const { data: categorias } = await supabase
     .from("categories")
     .select("id, name, level_hierarchy, anio_desde, anio_hasta");
@@ -288,6 +347,25 @@ export async function inscribirJugador(
   );
   if (!validacionAnio.ok) {
     return { ok: false, error: validacionAnio.error };
+  }
+
+  // Planteles (Paso 10B): primero hay que CREAR el plantel de la categoría
+  const { data: planteles } = await supabase
+    .from("club_planteles")
+    .select("category_id")
+    .eq("club_id", clubId)
+    .in("category_id", categoryIds);
+
+  const conPlantel = new Set((planteles ?? []).map((p) => p.category_id as string));
+  const sinPlantel = (categorias ?? []).filter(
+    (c) => categoryIds.includes(c.id as string) && !conPlantel.has(c.id as string)
+  );
+  if (sinPlantel.length > 0) {
+    const nombres = sinPlantel.map((c) => c.name as string).join(", ");
+    return {
+      ok: false,
+      error: `Primero creá el plantel de ${nombres} desde la pantalla de Planteles, y después inscribí al jugador ahí.`,
+    };
   }
 
   // 1. Crear el jugador (el DNI es único en toda la liga)
@@ -325,125 +403,148 @@ export async function inscribirJugador(
     };
   }
 
+  // 3. Subir la foto y los 4 documentos obligatorios, y vincular todo al
+  //    jugador. Si algo falla, se deshace el alta completo (jugador, vínculos
+  //    y archivos) para no dejar inscripciones a medias.
+  const admin = createLfsAdminClient();
+
+  const extFoto = foto.type.includes("png")
+    ? "png"
+    : foto.type.includes("webp")
+      ? "webp"
+      : "jpg";
+  const fotoPath = `${clubId}/${player.id}.${extFoto}`;
+
+  const { error: errorFoto } = await supabase.storage
+    .from("fotos-jugadores")
+    .upload(fotoPath, foto, { contentType: foto.type, upsert: true });
+
+  if (errorFoto) {
+    await admin.from("player_categories").delete().eq("player_id", player.id);
+    await admin.from("players").delete().eq("id", player.id);
+    return {
+      ok: false,
+      error: "No se pudo subir la foto y no se inscribió al jugador. Probá con otra foto.",
+    };
+  }
+
+  // Subir los documentos al bucket privado (misma convención del Paso 3)
+  const documents: Record<string, string> = {};
+  for (const { clave, archivo } of documentosArchivos) {
+    const ext = archivo.type === "application/pdf"
+      ? "pdf"
+      : archivo.type.includes("png")
+        ? "png"
+        : archivo.type.includes("webp")
+          ? "webp"
+          : "jpg";
+    const ruta = `${clubId}/${player.id}/${clave}.${ext}`;
+    const { error: errorDoc } = await supabase.storage
+      .from("documentos-jugadores")
+      .upload(ruta, archivo, { contentType: archivo.type, upsert: true });
+    if (errorDoc) {
+      const nombreDoc = DOCUMENTOS_INSCRIPCION.find((d) => d.clave === clave)?.nombre ?? clave;
+      await admin.from("player_categories").delete().eq("player_id", player.id);
+      await admin.from("players").delete().eq("id", player.id);
+      return {
+        ok: false,
+        error: `No se pudo subir el documento "${nombreDoc}" y no se inscribió al jugador. Probá de nuevo.`,
+      };
+    }
+    documents[clave] = ruta;
+  }
+
+  const { data: dataFoto, error: errorRpc } = await supabase.rpc(
+    "club_actualizar_jugador",
+    { p_player_id: player.id, p_foto_path: fotoPath, p_documents: documents }
+  );
+  if (errorRpc || dataFoto !== "OK") {
+    await admin.from("player_categories").delete().eq("player_id", player.id);
+    await admin.from("players").delete().eq("id", player.id);
+    return {
+      ok: false,
+      error: "No se pudo vincular la documentación y no se inscribió al jugador. Probá de nuevo.",
+    };
+  }
+
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
+  revalidatePath(`/club/planteles`);
   return { ok: true };
 }
 
-export async function actualizarConfiguracionClub(
+
+// ---------- PLANTELES POR CATEGORÍA (Paso 10B) ----------
+// Primero se crea el plantel de una categoría; recién después se puede
+// inscribir jugadores en ella. Doble rol: la liga en cualquier club,
+// el club solo en el suyo.
+
+export async function crearPlantel(
   clubId: string,
-  formData: FormData
+  categoryId: string
 ): Promise<ActionResult> {
-  const phone = String(formData.get("phone") ?? "").trim();
-  const camiseta = String(formData.get("camiseta") ?? "").trim();
-  const camiseta_alternativa = String(formData.get("camiseta_alternativa") ?? "").trim();
-
-  const supabase = await createLfsServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return { ok: false, error: "No hay sesión activa." };
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, club_id")
-    .eq("id", user.id)
-    .single();
-
-  if (!profile) return { ok: false, error: "Perfil no encontrado." };
-
-  if (profile.role !== "admin" && profile.club_id !== clubId) {
-    return { ok: false, error: "No tenés permiso para editar la configuración de este club." };
+  if (!clubId || !categoryId) {
+    return { ok: false, error: "Falta elegir la categoría del plantel." };
   }
 
-  const { data: club } = await supabase
-    .from("clubs")
-    .select("metadata")
-    .eq("id", clubId)
-    .single();
+  const { supabase, error } = await requireAdminOClubDuenio(clubId);
+  if (error) return { ok: false, error };
 
-  const currentMeta = (club?.metadata as Record<string, unknown>) ?? {};
-  const metadata = {
-    ...currentMeta,
-    telefono_delegado: phone,
-    color_camiseta: camiseta,
-    color_camiseta_alternativa: camiseta_alternativa,
-  };
+  const { error: insertError } = await supabase
+    .from("club_planteles")
+    .insert({ club_id: clubId, category_id: categoryId });
 
-  const adminClient = createLfsAdminClient();
-  const { error: updateError } = await adminClient
-    .from("clubs")
-    .update({ metadata })
-    .eq("id", clubId);
-
-  if (updateError) {
-    return { ok: false, error: `Error al actualizar la configuración: ${updateError.message}` };
+  if (insertError) {
+    if (insertError.code === "23505") {
+      return { ok: false, error: "Ese plantel ya existe." };
+    }
+    return { ok: false, error: `No se pudo crear el plantel: ${insertError.message}` };
   }
 
-  revalidatePath("/club/configuracion");
-  revalidatePath("/club/dashboard");
+  revalidatePath(`/admin/equipos/${clubId}/plantel`);
+  revalidatePath(`/club/planteles`);
   return { ok: true };
 }
 
-/**
- * Inscripción de jugador desde el portal del club (Zero-Trust via RPC)
- */
-export async function inscribirJugadorClubAction(
-  input: InscripcionJugadorInput
-): Promise<ActionResponse<{ player_id: string }>> {
-  const parseResult = InscripcionJugadorInputSchema.safeParse(input);
-  if (!parseResult.success) {
+export async function eliminarPlantel(plantelId: string): Promise<ActionResult> {
+  if (!plantelId) return { ok: false, error: "Falta el plantel." };
+
+  // Buscar el plantel para validar permisos sobre SU club
+  const supabaseLectura = await createLfsServerClient();
+  const { data: plantel } = await supabaseLectura
+    .from("club_planteles")
+    .select("id, club_id, category_id")
+    .eq("id", plantelId)
+    .maybeSingle();
+
+  if (!plantel) return { ok: false, error: "El plantel no existe." };
+
+  const { supabase, error } = await requireAdminOClubDuenio(plantel.club_id);
+  if (error) return { ok: false, error };
+
+  // Solo se puede eliminar un plantel VACÍO (sin jugadores inscriptos)
+  const { count } = await supabase
+    .from("player_categories")
+    .select("player_id", { count: "exact", head: true })
+    .eq("club_id", plantel.club_id)
+    .eq("category_id", plantel.category_id);
+
+  if ((count ?? 0) > 0) {
     return {
-      success: false,
-      error: parseResult.error.issues[0]?.message ?? "Datos de inscripción inválidos.",
+      ok: false,
+      error: "El plantel tiene jugadores: primero dales de baja o pasalos a otro club.",
     };
   }
 
-  const supabase = await createLfsServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { error: deleteError } = await supabase
+    .from("club_planteles")
+    .delete()
+    .eq("id", plantelId);
 
-  if (!user) {
-    return { success: false, error: "No hay sesión activa." };
+  if (deleteError) {
+    return { ok: false, error: `No se pudo eliminar el plantel: ${deleteError.message}` };
   }
 
-  const playerId = input.player_id ?? crypto.randomUUID();
-
-  const { data, error } = await supabase.rpc("inscribir_jugador_club", {
-    p_player_id: playerId,
-    p_dni: input.dni,
-    p_first_name: input.first_name,
-    p_last_name: input.last_name,
-    p_fecha_nacimiento: input.fecha_nacimiento,
-    p_foto_path: input.foto_path,
-    p_category_ids: input.category_ids,
-  });
-
-  if (error) {
-    return { success: false, error: error.message };
-  }
-
-  const res = data as {
-    success: boolean;
-    error?: string;
-    code?: string;
-    player_id?: string;
-    message?: string;
-  } | null;
-
-  if (!res || !res.success) {
-    return {
-      success: false,
-      error: res?.error ?? "Error al procesar la inscripción del jugador.",
-      code: res?.code,
-    };
-  }
-
-  revalidatePath("/club/planteles");
-  revalidatePath("/admin/equipos");
-  return {
-    success: true,
-    data: { player_id: res.player_id ?? playerId },
-  };
+  revalidatePath(`/admin/equipos/${plantel.club_id}/plantel`);
+  revalidatePath(`/club/planteles`);
+  return { ok: true };
 }

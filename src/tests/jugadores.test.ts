@@ -107,15 +107,16 @@ describe("categoriaSugeridaPorAnio", () => {
   });
 });
 
-describe("validarCategoriasPorAnio", () => {
-  it("acepta cuando la categoría base coincide con la sugerida", () => {
+describe("validarCategoriasPorAnio (regla estricta: solo su categoría)", () => {
+  it("acepta la categoría de su año", () => {
     const r = validarCategoriasPorAnio(2011, ["cat-sub16"], CATEGORIAS);
     expect(r.ok).toBe(true);
   });
 
-  it("acepta jugar en su categoría y además subir a una mayor", () => {
+  it("rechaza su categoría + una mayor (en el plantel NO, en la planilla sí)", () => {
     const r = validarCategoriasPorAnio(2011, ["cat-sub16", "cat-sub20"], CATEGORIAS);
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("Sub-16");
   });
 
   it("rechaza una categoría menor y sugiere la correcta", () => {
@@ -124,7 +125,7 @@ describe("validarCategoriasPorAnio", () => {
     expect(r.error).toContain("Sub-16");
   });
 
-  it("rechaza si solo elige una categoría mayor sin la base", () => {
+  it("rechaza una categoría mayor y sugiere la correcta", () => {
     const r = validarCategoriasPorAnio(2011, ["cat-sub20"], CATEGORIAS);
     expect(r.ok).toBe(false);
     expect(r.error).toContain("Sub-16");
