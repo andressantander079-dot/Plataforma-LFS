@@ -9,11 +9,6 @@ import {
   DOCUMENTOS_INSCRIPCION,
   type CategoriaConRango,
 } from "@/lib/core/rules/jugadoresRules";
-import {
-  InscripcionJugadorInputSchema,
-  type ActionResponse,
-  type InscripcionJugadorInput,
-} from "@/lib/core/rules/pasesRules";
 
 /**
  * ACCIONES DEL MÓDULO EQUIPOS (Pasos 2 y 4)
@@ -233,6 +228,38 @@ export async function crearClub(formData: FormData): Promise<ActionResult> {
     ok: true,
     aviso: avisos.length > 0 ? avisos.join(" | ") : undefined,
   };
+}
+
+// ---------- CAMBIAR ESTADO DE HABILITACIÓN DEL CLUB ----------
+export async function cambiarEstadoClub(
+  clubId: string,
+  nuevoEstado: "inhabilitado" | "en_revision" | "habilitado"
+): Promise<ActionResult> {
+  if (!clubId) return { ok: false, error: "Falta el club." };
+
+  const estadosValidos = ["inhabilitado", "en_revision", "habilitado"];
+  if (!estadosValidos.includes(nuevoEstado)) {
+    return { ok: false, error: "Estado de habilitación inválido." };
+  }
+
+  const { error } = await requireAdmin();
+  if (error) return { ok: false, error };
+
+  const admin = createLfsAdminClient();
+  const { error: dbError } = await admin
+    .from("clubs")
+    .update({ status: nuevoEstado })
+    .eq("id", clubId);
+
+  if (dbError) {
+    return { ok: false, error: `Error al actualizar estado: ${dbError.message}` };
+  }
+
+  revalidatePath("/admin/equipos");
+  revalidatePath("/club/dashboard");
+  revalidatePath("/club/planteles");
+  revalidatePath("/club/tramites");
+  return { ok: true };
 }
 
 // ---------- ASIGNAR CREDENCIALES A UN CLUB EXISTENTE ----------
@@ -554,121 +581,49 @@ export async function eliminarPlantel(plantelId: string): Promise<ActionResult> 
   return { ok: true };
 }
 
+// ============================================================================
+// CONFIGURACIÓN DEL CLUB (teléfono del delegado y colores de camiseta)
+// Lo edita el propio club desde /club/configuracion (o el admin).
+// Se guarda en clubs.metadata (jsonb), sin tocar los datos oficiales.
+// ============================================================================
 export async function actualizarConfiguracionClub(
   clubId: string,
   formData: FormData
 ): Promise<ActionResult> {
-  const phone = String(formData.get("phone") ?? "").trim();
-  const camiseta = String(formData.get("camiseta") ?? "").trim();
-  const camiseta_alternativa = String(formData.get("camiseta_alternativa") ?? "").trim();
+  if (!clubId) return { ok: false, error: "Falta el club." };
 
-  const supabase = await createLfsServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { error } = await requireAdminOClubDuenio(clubId);
+  if (error) return { ok: false, error };
 
-  if (!user) return { ok: false, error: "No hay sesión activa." };
+  const telefono = String(formData.get("phone") ?? "").trim().slice(0, 40);
+  const camiseta = String(formData.get("camiseta") ?? "").trim().slice(0, 80);
+  const camisetaAlt = String(formData.get("camiseta_alternativa") ?? "").trim().slice(0, 80);
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, club_id")
-    .eq("id", user.id)
-    .single();
-
-  if (!profile) return { ok: false, error: "Perfil no encontrado." };
-
-  if (profile.role !== "admin" && profile.club_id !== clubId) {
-    return { ok: false, error: "No tenés permiso para editar la configuración de este club." };
-  }
-
-  const { data: club } = await supabase
+  // Leer el metadata actual para hacer un MERGE (no pisar otras claves)
+  const admin = createLfsAdminClient();
+  const { data: club } = await admin
     .from("clubs")
     .select("metadata")
     .eq("id", clubId)
     .single();
+  if (!club) return { ok: false, error: "El club no existe." };
 
-  const currentMeta = (club?.metadata as Record<string, unknown>) ?? {};
   const metadata = {
-    ...currentMeta,
-    telefono_delegado: phone,
+    ...((club.metadata as Record<string, unknown>) ?? {}),
+    telefono_delegado: telefono,
     color_camiseta: camiseta,
-    color_camiseta_alternativa: camiseta_alternativa,
+    color_camiseta_alternativa: camisetaAlt,
   };
 
-  const adminClient = createLfsAdminClient();
-  const { error: updateError } = await adminClient
+  const { error: updateError } = await admin
     .from("clubs")
     .update({ metadata })
     .eq("id", clubId);
 
   if (updateError) {
-    return { ok: false, error: `Error al actualizar la configuración: ${updateError.message}` };
+    return { ok: false, error: `No se pudo guardar: ${updateError.message}` };
   }
 
   revalidatePath("/club/configuracion");
-  revalidatePath("/club/dashboard");
   return { ok: true };
-}
-
-/**
- * Inscripción de jugador desde el portal del club (Zero-Trust via RPC)
- */
-export async function inscribirJugadorClubAction(
-  input: InscripcionJugadorInput
-): Promise<ActionResponse<{ player_id: string }>> {
-  const parseResult = InscripcionJugadorInputSchema.safeParse(input);
-  if (!parseResult.success) {
-    return {
-      success: false,
-      error: parseResult.error.issues[0]?.message ?? "Datos de inscripción inválidos.",
-    };
-  }
-
-  const supabase = await createLfsServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { success: false, error: "No hay sesión activa." };
-  }
-
-  const playerId = input.player_id ?? crypto.randomUUID();
-
-  const { data, error } = await supabase.rpc("inscribir_jugador_club", {
-    p_player_id: playerId,
-    p_dni: input.dni,
-    p_first_name: input.first_name,
-    p_last_name: input.last_name,
-    p_fecha_nacimiento: input.fecha_nacimiento,
-    p_foto_path: input.foto_path,
-    p_category_ids: input.category_ids,
-  });
-
-  if (error) {
-    return { success: false, error: error.message };
-  }
-
-  const res = data as {
-    success: boolean;
-    error?: string;
-    code?: string;
-    player_id?: string;
-    message?: string;
-  } | null;
-
-  if (!res || !res.success) {
-    return {
-      success: false,
-      error: res?.error ?? "Error al procesar la inscripción del jugador.",
-      code: res?.code,
-    };
-  }
-
-  revalidatePath("/club/planteles");
-  revalidatePath("/admin/equipos");
-  return {
-    success: true,
-    data: { player_id: res.player_id ?? playerId },
-  };
 }

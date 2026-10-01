@@ -208,7 +208,24 @@ export async function iniciarPase(
   if (!toClub) return { error: "No se pudo determinar el club destino." };
 
   // Ventana de mercado: SIN excepciones (9B). Nadie inicia fuera de ventana.
-  const { data: ventanaAbierta } = await supabase.rpc("hay_ventana_pases");
+  let { data: ventanaAbierta } = await supabase.rpc("hay_ventana_pases");
+  if (!ventanaAbierta) {
+    const { data: leagueSettings } = await supabase
+      .from("league_settings")
+      .select("data")
+      .eq("id", 1)
+      .maybeSingle();
+    const tr = (leagueSettings?.data as Record<string, any>)?.transfers;
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (
+      tr?.window_status === "abierto" &&
+      (!tr.window_start_date || tr.window_start_date <= hoy) &&
+      (!tr.window_end_date || hoy <= tr.window_end_date)
+    ) {
+      ventanaAbierta = true;
+    }
+  }
+
   if (!ventanaAbierta) {
     return {
       error:

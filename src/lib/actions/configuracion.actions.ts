@@ -248,6 +248,18 @@ export async function guardarSeccionConfiguracion(
       parsedValues = DisciplineConfigSchema.parse(payload);
     } else if (seccion === "transfers") {
       parsedValues = TransfersConfigSchema.parse(payload);
+      const tr = parsedValues as {
+        window_status: string;
+        window_start_date?: string;
+        window_end_date?: string;
+      };
+      if (tr.window_status === "abierto" && tr.window_start_date && tr.window_end_date) {
+        await supabase.from("transfer_windows").insert({
+          nombre: "Libro de Pases (Configuración LFS)",
+          fecha_desde: tr.window_start_date,
+          fecha_hasta: tr.window_end_date,
+        });
+      }
     } else {
       return { success: false, error: "Sección de configuración no reconocida." };
     }

@@ -14,6 +14,7 @@ import { LinkFirma } from "@/components/pases/LinkFirma";
 import { NroFederativoInput } from "@/components/pases/NroFederativoInput";
 import { DocumentosPase, type DocumentoPaseUI } from "@/components/pases/DocumentosPase";
 import { ComprobantePase } from "@/components/pases/ComprobantePase";
+import { EvidenciaFirma, type EvidenciaTutorUI } from "@/components/pases/EvidenciaFirma";
 import { BotonImprimir } from "@/components/tesoreria/BotonImprimir";
 
 /**
@@ -75,6 +76,25 @@ export default async function PaseDetalleAdmin({
     pase.approved_at &&
     isCredentialActive(pase.approved_at);
 
+  // Evidencia de la firma online (9B): firma dibujada + foto del DNI (+ tutor si es menor)
+  const firmaJugadorPath =
+    typeof meta.firma_jugador_path === "string" ? meta.firma_jugador_path : null;
+  const dniJugadorPath =
+    typeof meta.foto_dni_jugador_path === "string" ? meta.foto_dni_jugador_path : null;
+  const tutorRaw = meta.tutor as Record<string, unknown> | null | undefined;
+  const tutorEvidencia: EvidenciaTutorUI | null =
+    !!tutorRaw && typeof tutorRaw.dni === "string"
+      ? {
+          parentesco: String(tutorRaw.parentesco ?? "Tutor/a"),
+          nombre: String(tutorRaw.nombre ?? ""),
+          apellido: String(tutorRaw.apellido ?? ""),
+          dni: String(tutorRaw.dni),
+          firma_path: String(tutorRaw.firma_path ?? ""),
+          dni_path: String(tutorRaw.foto_path ?? ""),
+        }
+      : null;
+  const hayEvidencia = !!(firmaJugadorPath || dniJugadorPath || tutorEvidencia);
+
   // Timeline de eventos registrados en metadata
   const timeline: { texto: string; fecha: string }[] = [
     { texto: `Solicitud iniciada (${origen} → ${destino})`, fecha: pase.created_at },
@@ -134,6 +154,12 @@ export default async function PaseDetalleAdmin({
               {pase.players?.dni ?? "—"} · iniciado el{" "}
               {new Date(pase.created_at).toLocaleDateString("es-AR")}
             </p>
+            <Link
+              href={`/admin/tramites/jugador/${pase.player_id}`}
+              className="text-[11px] font-bold text-[#F97316] hover:underline mt-1 inline-block"
+            >
+              Ver trayectoria completa del jugador →
+            </Link>
           </div>
           <span className={`text-[10px] font-bold px-3 py-1.5 rounded-full ${ui.className}`}>
             {ui.label}
@@ -165,6 +191,16 @@ export default async function PaseDetalleAdmin({
           </div>
         )}
       </div>
+
+      {/* Evidencia de la firma online (9B) */}
+      {hayEvidencia && (
+        <EvidenciaFirma
+          transferId={pase.id}
+          firmaJugadorPath={firmaJugadorPath}
+          dniJugadorPath={dniJugadorPath}
+          tutor={tutorEvidencia}
+        />
+      )}
 
       {/* Número federativo (referencia AFA/Comet) */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-2">

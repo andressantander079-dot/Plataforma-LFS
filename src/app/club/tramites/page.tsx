@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ClipboardList, ArrowRight, Gavel, Send, History } from "lucide-react";
+import { ClipboardList, ArrowRight, Gavel, Send, History, Undo2 } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { ESTADO_PASE_UI, type EstadoPase } from "@/lib/core/rules/pasesRules";
 import { FormularioSolicitudPase } from "@/components/pases/FormularioSolicitudPase";
@@ -8,6 +8,7 @@ import { DecisionClubOrigen } from "@/components/pases/DecisionClubOrigen";
 import { LinkFirma } from "@/components/pases/LinkFirma";
 import { BotonRetirarSolicitud } from "@/components/pases/BotonRetirarSolicitud";
 import { FormularioBajaJugador } from "@/components/pases/FormularioBajaJugador";
+import { BotonRescindirPrestamo } from "@/components/pases/BotonRescindirPrestamo";
 
 /**
  * TRÁMITES DEL CLUB — Pases y transferencias
@@ -20,6 +21,8 @@ import { FormularioBajaJugador } from "@/components/pases/FormularioBajaJugador"
 interface PaseClub {
   id: string;
   status: string;
+  tipo_pase: string;
+  fecha_retorno: string | null;
   created_at: string;
   numero_pase: string | null;
   from_club_id: string | null;
@@ -45,19 +48,23 @@ export default async function ClubTramites() {
   const clubId = profile?.club_id;
   if (!clubId) redirect("/login");
 
-  const [{ data: ventana }, { data: pases }, { data: plantel }] = await Promise.all([
-    supabase.rpc("hay_ventana_pases"),
-    supabase
-      .from("transfers")
-      .select(
-        "id, status, created_at, numero_pase, from_club_id, to_club_id, metadata, players(first_name, last_name, dni), from:clubs!transfers_from_club_id_fkey(name), to:clubs!transfers_to_club_id_fkey(name)"
-      )
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("player_categories")
-      .select("player_id, players(first_name, last_name)")
-      .eq("club_id", clubId),
-  ]);
+  const [{ data: ventana }, { data: pases }, { data: plantel }, { data: settings }] =
+    await Promise.all([
+      supabase.rpc("hay_ventana_pases"),
+      supabase
+        .from("transfers")
+        .select(
+          "id, status, tipo_pase, fecha_retorno, created_at, numero_pase, from_club_id, to_club_id, metadata, players(first_name, last_name, dni), from:clubs!transfers_from_club_id_fkey(name), to:clubs!transfers_to_club_id_fkey(name)"
+        )
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("player_categories")
+        .select("player_id, players(first_name, last_name)")
+        .eq("club_id", clubId),
+      supabase.from("pase_settings").select("recargo_rescision").eq("id", 1).single(),
+    ]);
+
+  const recargoRescision = Number(settings?.recargo_rescision ?? 0);
 
   const todos = (pases ?? []) as unknown as PaseClub[];
   const esperanDictamen = todos.filter(
@@ -66,6 +73,23 @@ export default async function ClubTramites() {
   const misSolicitudes = todos.filter((p) => p.to_club_id === clubId);
   const historialCesiones = todos.filter((p) => p.from_club_id === clubId);
 
+  // Préstamos activos que RECIBIÓ mi club (puede rescindirlos, con recargo)
+  const prestamosActivos = todos.filter(
+    (p) =>
+      p.tipo_pase === "prestamo" &&
+      p.status === "7_COMPLETED" &&
+      p.to_club_id === clubId &&
+      !(p.metadata ?? {}).devuelto_at
+  );
+  // Préstamos que mi club CEDIÓ (jugadores míos jugando en otro club)
+  const prestamosCedidos = todos.filter(
+    (p) =>
+      p.tipo_pase === "prestamo" &&
+      p.status === "7_COMPLETED" &&
+      p.from_club_id === clubId &&
+      !(p.metadata ?? {}).devuelto_at
+  );
+
   // Plantel propio (para la baja), sin duplicados por categoría
   const jugadoresMap = new Map<string, string>();
   for (const pc of plantel ?? []) {
@@ -73,6 +97,24 @@ export default async function ClubTramites() {
     if (pl) jugadoresMap.set(pc.player_id, `${pl.last_name}, ${pl.first_name}`);
   }
   const jugadores = [...jugadoresMap.entries()].map(([id, nombre]) => ({ id, nombre }));
+
+  let ventanaAbierta = !!ventana;
+  if (!ventanaAbierta) {
+    const { data: leagueConfig } = await supabase
+      .from("league_settings")
+      .select("data")
+      .eq("id", 1)
+      .maybeSingle();
+    const tr = (leagueConfig?.data as Record<string, any>)?.transfers;
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (
+      tr?.window_status === "abierto" &&
+      (!tr.window_start_date || tr.window_start_date <= hoy) &&
+      (!tr.window_end_date || hoy <= tr.window_end_date)
+    ) {
+      ventanaAbierta = true;
+    }
+  }
 
   const badge = (estado: string) => {
     const ui = ESTADO_PASE_UI[estado as EstadoPase] ?? {
@@ -101,7 +143,7 @@ export default async function ClubTramites() {
             Pedí pases, dictaminá los que te piden y seguí cada trámite paso a paso.
           </p>
         </div>
-        <FormularioSolicitudPase ventanaAbierta={!!ventana} />
+        <FormularioSolicitudPase ventanaAbierta={ventanaAbierta} />
       </div>
 
       {/* Esperan tu dictamen */}
@@ -185,6 +227,87 @@ export default async function ClubTramites() {
           </div>
         )}
       </section>
+
+      {/* Préstamos activos */}
+      {(prestamosActivos.length > 0 || prestamosCedidos.length > 0) && (
+        <section className="flex flex-col gap-3">
+          <h2 className="font-bold text-sm text-[#1A2A44] flex items-center gap-2">
+            <Undo2 className="w-4 h-4 text-[#F97316]" />
+            Préstamos activos ({prestamosActivos.length + prestamosCedidos.length})
+          </h2>
+          <div className="flex flex-col gap-2">
+            {prestamosActivos.map((p) => (
+              <div
+                key={p.id}
+                className="bg-white border border-sky-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm"
+              >
+                <div className="flex-1 min-w-[200px]">
+                  <p className="font-bold text-sm text-[#1A2A44] flex items-center gap-2 flex-wrap">
+                    {nombreJugador(p)}
+                    <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">
+                      Préstamo recibido
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Desde <span className="font-bold">{p.from?.name ?? "—"}</span>
+                    {p.fecha_retorno && (
+                      <>
+                        {" "}· vuelve el{" "}
+                        <span className="font-bold">
+                          {new Date(p.fecha_retorno).toLocaleDateString("es-AR")}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <BotonRescindirPrestamo transferId={p.id} recargo={recargoRescision} />
+                <Link
+                  href={`/club/tramites/pase/${p.id}`}
+                  className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-[#F97316] hover:text-[#F97316] transition"
+                >
+                  Ver detalle
+                </Link>
+              </div>
+            ))}
+            {prestamosCedidos.map((p) => (
+              <div
+                key={p.id}
+                className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm"
+              >
+                <div className="flex-1 min-w-[200px]">
+                  <p className="font-bold text-sm text-[#1A2A44] flex items-center gap-2 flex-wrap">
+                    {nombreJugador(p)}
+                    <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                      Prestado a otro club
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Está en <span className="font-bold">{p.to?.name ?? "—"}</span>
+                    {p.fecha_retorno && (
+                      <>
+                        {" "}· vuelve a tu club el{" "}
+                        <span className="font-bold">
+                          {new Date(p.fecha_retorno).toLocaleDateString("es-AR")}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <Link
+                  href={`/club/tramites/pase/${p.id}`}
+                  className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-[#F97316] hover:text-[#F97316] transition"
+                >
+                  Ver detalle
+                </Link>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400">
+            Rescindir un préstamo lo termina antes de tiempo: el jugador vuelve ya a su club de
+            origen y la liga te puede cargar un recargo.
+          </p>
+        </section>
+      )}
 
       {/* Historial de cesiones */}
       <section className="flex flex-col gap-3">

@@ -1,11 +1,12 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ClipboardList, Paperclip } from "lucide-react";
+import { ArrowLeft, ClipboardList, Paperclip, CalendarClock } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { aQuienLeToca, ESTADO_PASE_UI, type EstadoPase } from "@/lib/core/rules/pasesRules";
 import { StepperPase } from "@/components/pases/StepperPase";
 import { DocumentosPase, type DocumentoPaseUI } from "@/components/pases/DocumentosPase";
 import { ComprobantePase } from "@/components/pases/ComprobantePase";
+import { BotonRescindirPrestamo } from "@/components/pases/BotonRescindirPrestamo";
 import { BotonImprimir } from "@/components/tesoreria/BotonImprimir";
 
 /**
@@ -37,6 +38,29 @@ export default async function PaseDetalleClub({
   const meta = (pase.metadata ?? {}) as Record<string, unknown>;
   const estado = pase.status as EstadoPase;
   const ui = ESTADO_PASE_UI[estado];
+
+  // Mi club (para saber si puede rescindir un préstamo que recibió)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("club_id")
+    .eq("id", user.id)
+    .single();
+  const miClubId = profile?.club_id ?? null;
+
+  const esPrestamoEfectivo = pase.tipo_pase === "prestamo" && estado === "7_COMPLETED";
+  const prestamoDevuelto = typeof meta.devuelto_at === "string";
+  const puedeRescindir =
+    esPrestamoEfectivo && !prestamoDevuelto && miClubId !== null && pase.to_club_id === miClubId;
+
+  let recargoRescision = 0;
+  if (puedeRescindir) {
+    const { data: settings } = await supabase
+      .from("pase_settings")
+      .select("recargo_rescision")
+      .eq("id", 1)
+      .single();
+    recargoRescision = Number(settings?.recargo_rescision ?? 0);
+  }
 
   const { data: documentos } = await supabase
     .from("transfer_documents")
@@ -73,8 +97,53 @@ export default async function PaseDetalleClub({
           <span className={`text-[10px] font-bold px-3 py-1.5 rounded-full ${ui.className}`}>
             {ui.label}
           </span>
+          {pase.tipo_pase === "prestamo" && (
+            <span className="text-[10px] font-bold px-3 py-1.5 rounded-full bg-sky-100 text-sky-700">
+              Préstamo
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Datos del préstamo */}
+      {pase.tipo_pase === "prestamo" && (
+        <div className="bg-sky-50 border border-sky-200 rounded-2xl p-5 flex flex-col gap-3">
+          <h2 className="font-bold text-sm text-sky-900 flex items-center gap-2">
+            <CalendarClock className="w-4 h-4" /> Préstamo
+          </h2>
+          <p className="text-xs text-sky-800">
+            {prestamoDevuelto ? (
+              <>
+                Este préstamo ya terminó
+                {typeof meta.devuelto_at === "string" && (
+                  <>
+                    {" "}el{" "}
+                    <span className="font-bold">
+                      {new Date(meta.devuelto_at as string).toLocaleDateString("es-AR")}
+                    </span>
+                  </>
+                )}
+                : el jugador volvió a su club de origen.
+              </>
+            ) : pase.fecha_retorno ? (
+              <>
+                El jugador vuelve a su club de origen el{" "}
+                <span className="font-bold">
+                  {new Date(pase.fecha_retorno).toLocaleDateString("es-AR")}
+                </span>
+                . La vuelta es automática: la liga avisa antes de esa fecha.
+              </>
+            ) : (
+              "Préstamo sin fecha de retorno registrada."
+            )}
+          </p>
+          {puedeRescindir && (
+            <div className="border-t border-sky-200 pt-3">
+              <BotonRescindirPrestamo transferId={pase.id} recargo={recargoRescision} />
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
         <StepperPase estado={estado} />
