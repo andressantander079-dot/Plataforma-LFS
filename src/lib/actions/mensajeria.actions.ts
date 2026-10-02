@@ -213,16 +213,24 @@ export async function obtenerMensajes(conversacionId: string) {
 
 /** Cantidad de mensajes sin leer dirigidos al usuario actual (para el badge). */
 export async function contarNoLeidos(): Promise<number> {
-  const { supabase, user } = await obtenerUsuarioOError();
+  try {
+    const supabase = await createLfsServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return 0;
 
-  const { count, error } = await supabase
-    .from("messages")
-    .select("id", { count: "exact", head: true })
-    .is("read_at", null)
-    .neq("sender_id", user.id);
+    const { count, error } = await supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .is("read_at", null)
+      .neq("sender_id", user.id);
 
-  if (error) return 0;
-  return count ?? 0;
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 // ---------- Mutaciones ----------

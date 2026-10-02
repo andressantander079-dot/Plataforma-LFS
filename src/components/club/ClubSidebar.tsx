@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion";
 import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria";
+import { BottomNav } from "@/components/navigation/BottomNav";
 
 interface ClubSidebarProps {
   clubName: string;
@@ -165,10 +166,13 @@ export function ClubSidebar({ clubName, clubStatus, userName, children }: ClubSi
           </span>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto print:p-0">
+        <main className="flex-1 p-4 sm:p-6 md:p-8 pb-24 md:pb-8 overflow-y-auto print:p-0">
           {children}
         </main>
       </div>
+
+      {/* Barra de navegación inferior estilo app (solo móvil) */}
+      <BottomNav rol="club" />
     </div>
   );
 }

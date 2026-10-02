@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion"
 import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria"
+import { BottomNav } from "@/components/navigation/BottomNav"
 
 export default function AdminLayout({
   children,
@@ -29,7 +30,7 @@ export default function AdminLayout({
     { name: "Dashboard", href: "/admin/dashboard", icon: Trophy },
     { name: "Competencias", href: "/admin/competencias", icon: Trophy },
     { name: "Equipos (Clubes)", href: "/admin/equipos", icon: Users },
-    { name: "Tesorería", href: "/admin/tesoreria/movimientos", icon: Wallet },
+    { name: "Tesorería", href: "/admin/tesoreria", icon: Wallet },
     { name: "Trámites", href: "/admin/tramites", icon: ClipboardList },
     { name: "Colegio de Árbitros", href: "/admin/colegiodearbitros", icon: ShieldCheck },
     { name: "Tribunal de Disciplina", href: "/admin/tribunal/sanciones", icon: Scale },
@@ -99,12 +100,15 @@ export default function AdminLayout({
         </div>
       </aside>
 
-      {/* Área del Contenido Principal */}
+      {/* Área del Contenido Principal (padding inferior extra en móvil para la barra de navegación) */}
       <div className="flex-1 flex flex-col min-w-0">
-        <main className="flex-1 p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 p-6 md:p-8 pb-24 md:pb-8 overflow-y-auto">
           {children}
         </main>
       </div>
+
+      {/* Barra de navegación inferior estilo app (solo móvil) */}
+      <BottomNav rol="admin" />
     </div>
   );
 }

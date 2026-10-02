@@ -27,13 +27,19 @@ const SECCIONES: Record<string, string[]> = {
 
 function panelDelRol(role: string): string {
   if (role === "admin") return "/admin/dashboard";
-  if (role === "tesorero") return "/admin/tesoreria/movimientos";
+  if (role === "tesorero") return "/admin/tesoreria";
   if (role === "club") return "/club/dashboard";
   if (role === "arbitro" || role === "arbitro_asistente") return "/arbitro/dashboard";
   return "/login";
 }
 
-export default async function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
+  // Las Server Actions manejan su propia autenticación y autorización.
+  // Interceptarlas con redirecciones HTTP provoca "An unexpected response was received from the server" en Next.js.
+  if (request.headers.get("next-action")) {
+    return NextResponse.next();
+  }
+
   const { pathname } = request.nextUrl;
   const seccion = Object.keys(SECCIONES).find((s) => pathname.startsWith(s));
   if (!seccion) return NextResponse.next();
@@ -90,3 +96,5 @@ export default async function proxy(request: NextRequest) {
 export const config = {
   matcher: ["/admin/:path*", "/club/:path*", "/arbitro/:path*"],
 };
+
+export default proxy;

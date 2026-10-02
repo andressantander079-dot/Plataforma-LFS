@@ -14,7 +14,12 @@ export function BadgeMensajeria() {
   const [cantidad, setCantidad] = useState(0);
 
   const refrescar = useCallback(async () => {
-    setCantidad(await contarNoLeidos());
+    try {
+      const res = await contarNoLeidos();
+      setCantidad(res ?? 0);
+    } catch {
+      // Ignorar de forma segura si no hay conexión o sesión activa
+    }
   }, []);
 
   useEffect(() => {

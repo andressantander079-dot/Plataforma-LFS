@@ -54,7 +54,7 @@ export default function LoginPage() {
       if (role === "admin") {
         router.push("/admin/dashboard");
       } else if (role === "tesorero") {
-        router.push("/admin/tesoreria/movimientos");
+        router.push("/admin/tesoreria");
       } else if (role === "arbitro" || role === "arbitro_asistente") {
         router.push("/arbitro/dashboard");
       } else if (role === "club") {

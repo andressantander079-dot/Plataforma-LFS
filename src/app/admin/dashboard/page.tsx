@@ -1,92 +1,250 @@
-"use client";
-
 import Link from "next/link";
-import { 
-  Trophy, Users, Wallet, ClipboardList, MessageSquare, 
-  ShieldCheck, Scale, FileText, Calendar, Settings, BarChart3, Activity 
+import {
+  Users,
+  UserRound,
+  ClipboardList,
+  FileWarning,
+  Trophy,
+  CalendarPlus,
+  Wallet,
+  Store,
+  TrendingUp,
 } from "lucide-react";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { bucketsPorDia, clasificarUrgencia, textoConteo, type ItemAtencion } from "@/lib/core/rules/dashboardRules";
+import { SaludoInteligente } from "@/components/dashboards/SaludoInteligente";
+import { TarjetaKpi } from "@/components/dashboards/TarjetaKpi";
+import { ListaAtencion } from "@/components/dashboards/ListaAtencion";
+import { QuickActions } from "@/components/dashboards/QuickActions";
+import { FeedActividad, type ItemActividad } from "@/components/dashboards/FeedActividad";
+import { Sparkline } from "@/components/dashboards/Sparkline";
+import { RealtimeRefresher } from "@/components/realtime/RealtimeRefresher";
 
-export default function AdminDashboard() {
-  const stats = [
-    { name: "Partidos de Hoy", value: "3", desc: "1 en curso, 2 programados" },
-    { name: "Mensajes Nuevos", value: "14", desc: "8 de clubes, 6 de árbitros" },
-    { name: "Trámites de Pase", value: "6", desc: "4 esperando revisión FVF" },
-    { name: "Saldo Tesorería", value: "$420.500", desc: "Pesos Argentinos (ARS)" },
-  ];
+/**
+ * DASHBOARD ADMIN — Centro de comando de la federación (DATOS REALES).
+ * KPIs: clubes activos, jugadores inscriptos, trámites pendientes,
+ * planillas sin cargar. Semáforo 48 hs, sparkline de actividad de los
+ * últimos 30 días y feed de auditoría. Se actualiza en tiempo real.
+ */
+export const dynamic = "force-dynamic";
 
-  const modules = [
-    { name: "Competencias", href: "/admin/competencias", icon: Trophy, desc: "Crear torneos, fixtures y llaves", badge: "2 Activos" },
-    { name: "Equipos (Clubes)", href: "/admin/equipos", icon: Users, desc: "Habilitación de clubes y planteles", badge: "3 Clubes" },
-    { name: "Tesorería", href: "/admin/tesoreria", icon: Wallet, desc: "Ingresos, egresos y PIN 00T00", badge: "Seguro" },
-    { name: "Trámites", href: "/admin/tramites", icon: ClipboardList, desc: "Bajas, altas y auditoría de pases", badge: "6 Ptes" },
-    { name: "Colegio de Árbitros", href: "/admin/colegiodearbitros", icon: ShieldCheck, desc: "Fichaje y evaluaciones de árbitros", badge: "8 Árb." },
-    { name: "Designaciones", href: "/admin/designaciones", icon: Calendar, desc: "Asignar ternas a los partidos", badge: "Fecha 5" },
-    { name: "Tribunal Disciplinario", href: "/admin/tribunal", icon: Scale, desc: "Sanciones, multas y apelaciones", badge: "2 Activas" },
-    { name: "Mensajería", href: "/admin/mensajeria/bandeja", icon: MessageSquare, desc: "Bandeja y archivado PIN 9090", badge: "14 Ptes" },
-    { name: "Reglamento Oficial", href: "/admin/reglamento", icon: FileText, desc: "Subida de PDF e historial de versiones", badge: "v2026" },
-    { name: "Agenda", href: "/admin/agenda", icon: Calendar, desc: "Calendario institucional y recordatorios", badge: "3 Ev." },
-    { name: "Configuración General", href: "/admin/configuracion", icon: Settings, desc: "Identidad, categorías, sponsors, sedes y reglas", badge: "Oficial" },
-    { name: "Estadísticas Globales", href: "/admin/estadisticas", icon: BarChart3, desc: "Rendimiento global de la liga", badge: "Top 8" },
-  ];
+export default async function AdminDashboard() {
+  const supabase = await createLfsServerClient();
+  const ahora = new Date();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: profile } = user
+    ? await supabase.from("profiles").select("full_name").eq("id", user.id).single()
+    : { data: null };
+
+  // ---------------- Consultas en paralelo ----------------
+  const hace30Dias = new Date(ahora.getTime() - 30 * 86_400_000).toISOString();
+
+  const [
+    { count: clubesActivos },
+    { count: clubesEnRevision },
+    { count: jugadoresInscriptos },
+    { data: pasesPendientes },
+    { data: settingsPases },
+    { data: partidosSinCargar },
+    { data: partidos30d },
+    { count: pagosPorAprobar },
+    { data: actividad },
+  ] = await Promise.all([
+    supabase.from("clubs").select("id", { count: "exact", head: true }).eq("status", "habilitado"),
+    supabase.from("clubs").select("id", { count: "exact", head: true }).eq("status", "en_revision"),
+    supabase.from("players").select("id", { count: "exact", head: true }),
+    supabase
+      .from("transfers")
+      .select("id, status, created_at")
+      .in("status", ["2_FVF_REVIEW", "6_FINAL_AUDIT"]),
+    supabase.from("pase_settings").select("alerta_trabado_horas").eq("id", 1).maybeSingle(),
+    supabase
+      .from("matches")
+      .select("id, scheduled_at")
+      .eq("status", "programado")
+      .lt("scheduled_at", ahora.toISOString())
+      .order("scheduled_at", { ascending: true })
+      .limit(50),
+    supabase
+      .from("matches")
+      .select("scheduled_at")
+      .eq("result_confirmed", true)
+      .gte("scheduled_at", hace30Dias),
+    supabase.from("treasury_payments").select("id", { count: "exact", head: true }).eq("status", "pendiente"),
+    supabase
+      .from("audit_logs")
+      .select("id, action, module, created_at")
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
+
+  // ---------------- Semáforo "Requiere atención" ----------------
+  const horasTrabado = Number(settingsPases?.alerta_trabado_horas ?? 48);
+  const trabados = (pasesPendientes ?? []).filter(
+    (p) =>
+      p.status === "2_FVF_REVIEW" &&
+      ahora.getTime() - new Date(p.created_at).getTime() > horasTrabado * 3_600_000
+  );
+  const tramitesPendientes = (pasesPendientes ?? []).length;
+  const planillasSinCargar = (partidosSinCargar ?? []).length;
+
+  const items: ItemAtencion[] = [];
+
+  if (trabados.length > 0) {
+    items.push({
+      nivel: "rojo",
+      titulo: textoConteo(trabados.length, "pase trabado", "pases trabados"),
+      detalle: `Esperan tu dictamen hace más de ${horasTrabado} hs. Se cancelan solos si pasan 72 hs.`,
+      href: "/admin/tramites",
+      accion: "Dictaminar",
+    });
+  }
+
+  const peorPlanilla = (partidosSinCargar ?? [])[0];
+  if (planillasSinCargar > 0) {
+    items.push({
+      nivel: clasificarUrgencia(peorPlanilla?.scheduled_at ?? null, ahora, 48),
+      titulo: textoConteo(planillasSinCargar, "planilla sin cargar", "planillas sin cargar"),
+      detalle: "Partidos ya jugados cuyo resultado todavía no fue cargado por el árbitro.",
+      href: "/admin/designaciones",
+      accion: "Revisar",
+    });
+  }
+
+  if ((pagosPorAprobar ?? 0) > 0) {
+    items.push({
+      nivel: "amarillo",
+      titulo: textoConteo(pagosPorAprobar ?? 0, "pago por aprobar", "pagos por aprobar"),
+      detalle: "Comprobantes informados por los clubes esperando verificación de tesorería.",
+      href: "/admin/tesoreria/movimientos",
+      accion: "Verificar",
+    });
+  }
+
+  const pasesNoTrabados = tramitesPendientes - trabados.length;
+  if (pasesNoTrabados > 0) {
+    items.push({
+      nivel: "amarillo",
+      titulo: textoConteo(pasesNoTrabados, "trámite en curso", "trámites en curso"),
+      detalle: "Pases esperando revisión o auditoría final de la liga.",
+      href: "/admin/tramites",
+      accion: "Ver",
+    });
+  }
+
+  if ((clubesEnRevision ?? 0) > 0) {
+    items.push({
+      nivel: "info",
+      titulo: textoConteo(clubesEnRevision ?? 0, "club en revisión", "clubes en revisión"),
+      detalle: "Clubes que pidieron habilitación y esperan aprobación.",
+      href: "/admin/equipos",
+      accion: "Revisar",
+    });
+  }
+
+  // Sparkline: partidos confirmados por día, últimos 30 días
+  const spark30 = bucketsPorDia(
+    (partidos30d ?? []).map((p) => p.scheduled_at as string),
+    30,
+    ahora
+  );
+  const totalPartidos30d = spark30.reduce((a, b) => a + b, 0);
+
+  const pendientesTotales = items.filter((i) => i.nivel !== "info").length;
 
   return (
-    <div className="flex flex-col gap-8">
-      {/* Encabezado */}
-      <section className="flex justify-between items-center border-b border-slate-200 pb-5">
-        <div>
-          <h2 className="font-serif text-3xl font-black text-[#1A2A44]">
-            Panel de Administración
-          </h2>
-          <p className="text-slate-500 text-sm mt-1">
-            Gestión integral de la Liga de Fútsal de Ushuaia v3.0.
-          </p>
-        </div>
+    <div className="max-w-5xl mx-auto flex flex-col gap-6">
+      <RealtimeRefresher
+        tablas={["matches", "transfers", "players", "clubs", "treasury_payments", "audit_logs"]}
+      />
+
+      <SaludoInteligente
+        nombre={profile?.full_name ?? null}
+        pendientes={pendientesTotales}
+        rol="Administración LFS"
+      />
+
+      <ListaAtencion items={items} />
+
+      {/* KPIs principales */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <TarjetaKpi
+          titulo="Clubes activos"
+          valor={clubesActivos ?? 0}
+          detalle={clubesEnRevision ? `${clubesEnRevision} en revisión` : "Habilitados"}
+          icono={Store}
+          acento="azul"
+          href="/admin/equipos"
+        />
+        <TarjetaKpi
+          titulo="Jugadores inscriptos"
+          valor={jugadoresInscriptos ?? 0}
+          detalle="Fichados en la liga"
+          icono={Users}
+          acento="verde"
+          href="/admin/equipos"
+        />
+        <TarjetaKpi
+          titulo="Trámites pendientes"
+          valor={tramitesPendientes}
+          detalle={trabados.length > 0 ? `${trabados.length} trabados` : "Pases en circuito"}
+          icono={ClipboardList}
+          acento={trabados.length > 0 ? "rojo" : "naranja"}
+          href="/admin/tramites"
+        />
+        <TarjetaKpi
+          titulo="Planillas sin cargar"
+          valor={planillasSinCargar}
+          detalle="Resultados pendientes"
+          icono={FileWarning}
+          acento={planillasSinCargar > 0 ? "rojo" : "verde"}
+          href="/admin/designaciones"
+        />
       </section>
 
-      {/* Grid de Resumen Rápido */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat) => (
-          <div key={stat.name} className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex flex-col justify-between">
-            <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{stat.name}</span>
-            <span className="text-2xl font-serif font-black text-[#1A2A44] my-1">{stat.value}</span>
-            <span className="text-slate-400 text-[9px] font-medium">{stat.desc}</span>
+      {/* Actividad de la liga: sparkline 30 días */}
+      <section className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-[#F97316]" />
+            <h2 className="font-serif text-base font-bold text-[#1A2A44]">
+              Actividad de la liga
+            </h2>
           </div>
-        ))}
+          <span className="text-[11px] font-bold text-slate-400">
+            {totalPartidos30d} partidos en 30 días
+          </span>
+        </div>
+        <div className="h-20">
+          <Sparkline valores={spark30} id="admin-30d" ancho={600} alto={80} />
+        </div>
+        <p className="text-[10px] text-slate-400">
+          Partidos con resultado confirmado por día, últimos 30 días.
+        </p>
       </section>
 
-      {/* Mosaicos de Módulos Operativos (Tiles) */}
-      <section className="flex flex-col gap-4">
-        <h3 className="font-sans text-xs font-black tracking-widest text-slate-400 uppercase">Módulos Administrativos</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="admin-modules-grid">
-          {modules.map((mod) => (
-            <Link
-              key={mod.name}
-              href={mod.href}
-              id={`tile-admin-${mod.name.toLowerCase().replace(/\s+/g, "-")}`}
-              className="bg-white border border-slate-200 rounded-2xl p-5 hover:border-[#F97316] hover:shadow-md transition duration-250 flex flex-col justify-between group h-40"
-            >
-              <div>
-                <div className="flex justify-between items-start mb-3">
-                  <div className="w-9 h-9 bg-slate-50 rounded-xl flex items-center justify-center text-[#1A2A44] group-hover:bg-[#F97316] group-hover:text-white transition shadow-inner">
-                    <mod.icon className="w-5 h-5" />
-                  </div>
-                  {mod.badge && (
-                    <span className="text-[8px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded border border-slate-200">
-                      {mod.badge}
-                    </span>
-                  )}
-                </div>
-                <h4 className="font-serif text-sm font-bold text-[#1A2A44] leading-snug group-hover:text-[#F97316] transition">
-                  {mod.name}
-                </h4>
-              </div>
-              <p className="text-[10px] text-slate-400 font-medium leading-relaxed mt-2">
-                {mod.desc}
-              </p>
-            </Link>
-          ))}
-        </div>
-      </section>
+      <QuickActions
+        acciones={[
+          { href: "/admin/competencias", label: "Torneos y fixture", icono: Trophy },
+          { href: "/admin/agenda", label: "Agenda de fechas", icono: CalendarPlus },
+          { href: "/admin/tramites", label: "Revisar pases", icono: ClipboardList },
+          { href: "/admin/tesoreria/movimientos", label: "Verificar pagos", icono: Wallet },
+        ]}
+      />
+
+      <FeedActividad items={(actividad ?? []) as ItemActividad[]} />
+
+      <p className="text-center text-[10px] text-slate-400 pb-6">
+        ¿Buscás el detalle completo? Entrá a{" "}
+        <Link href="/admin/estadisticas" className="text-[#F97316] font-bold">
+          Estadísticas
+        </Link>{" "}
+        o al módulo correspondiente desde el menú.
+      </p>
     </div>
   );
 }
