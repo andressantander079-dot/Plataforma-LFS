@@ -8,6 +8,7 @@ import {
   isCredentialActive,
   type EstadoPase,
 } from "@/lib/core/rules/pasesRules";
+import { obtenerDetallePaseAdmin } from "@/lib/actions/tramites.actions";
 import { StepperPase } from "@/components/pases/StepperPase";
 import { AccionesPaseAdmin } from "@/components/pases/AccionesPaseAdmin";
 import { LinkFirma } from "@/components/pases/LinkFirma";
@@ -16,11 +17,17 @@ import { DocumentosPase, type DocumentoPaseUI } from "@/components/pases/Documen
 import { ComprobantePase } from "@/components/pases/ComprobantePase";
 import { EvidenciaFirma, type EvidenciaTutorUI } from "@/components/pases/EvidenciaFirma";
 import { BotonImprimir } from "@/components/tesoreria/BotonImprimir";
+import { TarjetaAccionPase, BarraAccionFija } from "@/components/tramites/TarjetaAccionPase";
+import { HerramientasTrabado } from "@/components/tramites/HerramientasTrabado";
+import { ChecklistPase } from "@/components/tramites/ChecklistPase";
+import { CargoPrevistoPase } from "@/components/tramites/CargoPrevistoPase";
+import { TimelinePase } from "@/components/tramites/TimelinePase";
 
 /**
- * DETALLE DEL PASE (admin) — auditoría completa del trámite:
- * stepper del circuito, timeline con fechas, documentos, acciones según
- * el estado, número federativo y comprobante imprimible al completarse.
+ * DETALLE DEL PASE (admin, Paso 15) — qué hay que hacer ahora, checklist del
+ * trámite, cargo de tesorería previsto/real, stepper, evidencia de firma,
+ * documentos, timeline y acciones. En móvil la acción principal queda fija
+ * abajo de la pantalla.
  */
 export default async function PaseDetalleAdmin({
   params,
@@ -43,32 +50,17 @@ export default async function PaseDetalleAdmin({
     .single();
   if (!pase) notFound();
 
+  // Detalle enriquecido: checklist, cargo previsto, timeline, trabado, acción
+  const detalle = await obtenerDetallePaseAdmin(id);
+
   const meta = (pase.metadata ?? {}) as Record<string, unknown>;
-  const estado = pase.status as EstadoPase;
+  const estado = detalle.estado;
   const ui = ESTADO_PASE_UI[estado];
+  const esTerminal = ["7_COMPLETED", "8_RECHAZADO", "9_CANCELADO"].includes(estado);
 
-  const [{ data: documentos }, { data: historial }] = await Promise.all([
-    supabase
-      .from("transfer_documents")
-      .select("id, nombre, path, created_at")
-      .eq("transfer_id", id)
-      .order("created_at"),
-    supabase
-      .from("transfers")
-      .select(
-        "id, status, numero_pase, created_at, from:clubs!transfers_from_club_id_fkey(name), to:clubs!transfers_to_club_id_fkey(name)"
-      )
-      .eq("player_id", pase.player_id)
-      .neq("id", id)
-      .order("created_at", { ascending: false }),
-  ]);
-
-  const jugadorNombre = pase.players
-    ? `${pase.players.last_name}, ${pase.players.first_name}`
-    : "—";
-  const origen =
-    (pase.from as unknown as { name: string } | null)?.name ?? "Jugador libre";
-  const destino = (pase.to as unknown as { name: string } | null)?.name ?? "—";
+  const jugadorNombre = detalle.jugadorNombre;
+  const origen = detalle.origen;
+  const destino = detalle.destino;
 
   const firmaToken = typeof meta.firma_token === "string" ? meta.firma_token : null;
   const firmaActiva =
@@ -95,47 +87,8 @@ export default async function PaseDetalleAdmin({
       : null;
   const hayEvidencia = !!(firmaJugadorPath || dniJugadorPath || tutorEvidencia);
 
-  // Timeline de eventos registrados en metadata
-  const timeline: { texto: string; fecha: string }[] = [
-    { texto: `Solicitud iniciada (${origen} → ${destino})`, fecha: pase.created_at },
-  ];
-  if (meta.excepcional) {
-    timeline.push({
-      texto: "⚠️ Iniciado como EXCEPCIÓN fuera de ventana por la liga",
-      fecha: pase.created_at,
-    });
-  }
-  if (typeof meta.notificado_at === "string") {
-    timeline.push({
-      texto: "Liga aprobó la revisión → dictamen del club de origen",
-      fecha: meta.notificado_at,
-    });
-  }
-  if (pase.approved_at && progresoAlMenosFirma(estado)) {
-    timeline.push({ texto: "Club de origen aprobó → firma del jugador", fecha: pase.approved_at });
-  }
-  if (typeof meta.firmado_at === "string") {
-    timeline.push({ texto: "✍️ Jugador firmó online con su DNI", fecha: meta.firmado_at });
-  }
-  if (typeof meta.completado_at === "string") {
-    timeline.push({ texto: `🎉 Pase efectivo (${pase.numero_pase ?? "sin número"})`, fecha: meta.completado_at });
-  }
-  if (typeof meta.rechazado_at === "string") {
-    timeline.push({
-      texto: `❌ Rechazado por ${meta.rechazado_por === "club_origen" ? "el club de origen" : "la liga"}: ${meta.rechazo_motivo ?? ""}`,
-      fecha: meta.rechazado_at,
-    });
-  }
-  if (typeof meta.cancelado_at === "string") {
-    timeline.push({ texto: `🚫 Cancelado: ${meta.cancelacion_motivo ?? ""}`, fecha: meta.cancelado_at });
-  }
-
-  function progresoAlMenosFirma(e: EstadoPase) {
-    return ["5_PLAYER_SIGNATURE", "6_FINAL_AUDIT", "7_COMPLETED"].includes(e);
-  }
-
   return (
-    <div className="flex flex-col gap-6 max-w-3xl mx-auto">
+    <div className="flex flex-col gap-6 max-w-3xl mx-auto pb-24 md:pb-8">
       <div className="border-b border-slate-200 pb-4 flex flex-col gap-3">
         <Link
           href="/admin/tramites"
@@ -167,16 +120,35 @@ export default async function PaseDetalleAdmin({
         </div>
       </div>
 
+      {/* QUÉ HAY QUE HACER AHORA — la acción principal, siempre visible */}
+      {!esTerminal && (
+        <TarjetaAccionPase transferId={pase.id} accion={detalle.accion} trabado={detalle.trabado} />
+      )}
+
+      {/* Herramientas para destrabar (solo si está trabado) */}
+      {detalle.trabado && !esTerminal && <HerramientasTrabado transferId={pase.id} />}
+
+      {/* Checklist automático del trámite */}
+      {!esTerminal && <ChecklistPase items={detalle.checklist} />}
+
+      {/* Cargo a tesorería: previsto desde el inicio, real al completarse */}
+      <CargoPrevistoPase
+        previsto={detalle.cargoPrevisto}
+        cargosReales={detalle.cargosReales}
+        completado={estado === "7_COMPLETED"}
+      />
+
+      {/* Stepper del circuito */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
         <StepperPase estado={estado} />
-        {!["7_COMPLETED", "8_RECHAZADO", "9_CANCELADO"].includes(estado) && (
+        {!esTerminal && (
           <p className="text-[11px] text-slate-400 mt-3">
             Ahora le toca a: <span className="font-bold text-slate-600">{aQuienLeToca(estado)}</span>
           </p>
         )}
       </div>
 
-      {/* Acciones del admin */}
+      {/* Acciones clásicas de la liga (rechazar, regenerar link, deuda saldada) */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
         <h2 className="font-bold text-sm text-[#1A2A44]">Acciones de la liga</h2>
         <AccionesPaseAdmin transferId={pase.id} estado={estado} />
@@ -216,34 +188,22 @@ export default async function PaseDetalleAdmin({
         <h2 className="font-bold text-sm text-[#1A2A44] flex items-center gap-2">
           <Paperclip className="w-4 h-4 text-[#F97316]" /> Documentos del pase
         </h2>
-        <DocumentosPase
-          transferId={pase.id}
-          documentos={(documentos ?? []) as DocumentoPaseUI[]}
-        />
+        <DocumentosPase transferId={pase.id} documentos={detalle.documentos as DocumentoPaseUI[]} />
       </div>
 
-      {/* Timeline */}
+      {/* Timeline del trámite (con fecha y hora de cada evento) */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-2">
         <h2 className="font-bold text-sm text-[#1A2A44] flex items-center gap-2">
           <History className="w-4 h-4 text-[#F97316]" /> Historial del trámite
         </h2>
-        <ol className="flex flex-col gap-2">
-          {timeline.map((t, i) => (
-            <li key={i} className="flex gap-3 text-xs">
-              <span className="text-slate-400 font-semibold whitespace-nowrap w-24 shrink-0">
-                {new Date(t.fecha).toLocaleDateString("es-AR")}
-              </span>
-              <span className="text-[#1A2A44] font-semibold">{t.texto}</span>
-            </li>
-          ))}
-        </ol>
+        <TimelinePase eventos={detalle.timeline} />
       </div>
 
       {/* Historial del jugador */}
-      {(historial ?? []).length > 0 && (
+      {detalle.historial.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-2">
           <h2 className="font-bold text-sm text-[#1A2A44]">Otros pases de este jugador</h2>
-          {(historial ?? []).map((h) => (
+          {detalle.historial.map((h) => (
             <Link
               key={h.id}
               href={`/admin/tramites/pases/${h.id}`}
@@ -252,8 +212,7 @@ export default async function PaseDetalleAdmin({
               <span className="text-slate-400">
                 {new Date(h.created_at).toLocaleDateString("es-AR")}
               </span>
-              {(h.from as unknown as { name: string } | null)?.name ?? "Libre"} →{" "}
-              {(h.to as unknown as { name: string } | null)?.name ?? "—"}
+              {h.origen} → {h.destino}
               {h.numero_pase && (
                 <span className="font-mono text-[#F97316]">{h.numero_pase}</span>
               )}
@@ -281,6 +240,9 @@ export default async function PaseDetalleAdmin({
           <BotonImprimir />
         </div>
       )}
+
+      {/* Barra fija inferior con la acción principal (solo móvil) */}
+      {!esTerminal && <BarraAccionFija transferId={pase.id} accion={detalle.accion} />}
     </div>
   );
 }

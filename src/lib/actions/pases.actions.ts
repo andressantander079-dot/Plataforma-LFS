@@ -17,6 +17,10 @@ import {
   type TransferFeeInput,
   type TransferWindowInput,
 } from "@/lib/core/rules/pasesRules";
+import {
+  calcularRecargoRescision,
+  type RecargoModo,
+} from "@/lib/core/rules/tramitesRules";
 
 /**
  * PASES Y TRANSFERENCIAS — Acciones de servidor (Pasos 9 y 9B)
@@ -208,23 +212,10 @@ export async function iniciarPase(
   if (!toClub) return { error: "No se pudo determinar el club destino." };
 
   // Ventana de mercado: SIN excepciones (9B). Nadie inicia fuera de ventana.
-  let { data: ventanaAbierta } = await supabase.rpc("hay_ventana_pases");
-  if (!ventanaAbierta) {
-    const { data: leagueSettings } = await supabase
-      .from("league_settings")
-      .select("data")
-      .eq("id", 1)
-      .maybeSingle();
-    const tr = (leagueSettings?.data as Record<string, any>)?.transfers;
-    const hoy = new Date().toISOString().slice(0, 10);
-    if (
-      tr?.window_status === "abierto" &&
-      (!tr.window_start_date || tr.window_start_date <= hoy) &&
-      (!tr.window_end_date || hoy <= tr.window_end_date)
-    ) {
-      ventanaAbierta = true;
-    }
-  }
+  // ÚNICA fuente de verdad (Paso 15): la tabla transfer_windows vía RPC
+  // hay_ventana_pases. Las ventanas se gestionan desde Configuración LFS →
+  // "Pases & Fichajes" y el estado (próxima/abierta/cerrada) sale de las fechas.
+  const { data: ventanaAbierta } = await supabase.rpc("hay_ventana_pases");
 
   if (!ventanaAbierta) {
     return {
@@ -399,21 +390,34 @@ export async function decidirPaseOrigen(
       };
     }
 
-    const token = crypto.randomUUID();
+    // ¿La liga exige firma online del jugador? (Paso 15: configurable)
+    const { data: settingsPase } = await supabase
+      .from("pase_settings")
+      .select("firma_obligatoria")
+      .eq("id", 1)
+      .single();
+    const firmaObligatoria =
+      (settingsPase as { firma_obligatoria?: boolean } | null)?.firma_obligatoria ?? true;
+
+    const token = firmaObligatoria ? crypto.randomUUID() : null;
     const { error } = await supabase
       .from("transfers")
       .update({
-        status: "5_PLAYER_SIGNATURE",
+        status: firmaObligatoria ? "5_PLAYER_SIGNATURE" : "6_FINAL_AUDIT",
         approved_at: new Date().toISOString(),
         deuda_monto: deudaLimpia ? deudaLimpia.monto : null,
         deuda_modo: deudaLimpia ? deudaLimpia.modo : null,
         deuda_descripcion: deudaLimpia?.descripcion ?? null,
-        metadata: { ...pase.metadata, firma_token: token },
+        metadata: firmaObligatoria
+          ? { ...pase.metadata, firma_token: token }
+          : pase.metadata,
       })
       .eq("id", transferId);
     if (error) return { error: "No se pudo aprobar el pase." };
 
-    let texto = `✅ Tu club de origen APROBÓ el ${nombreTipoPase(pase.tipo_pase)} de ${nombreJugador(pase)}. Ahora tiene que firmar el jugador: entrá a Trámites y compartile el link de firma (dura 72 hs).`;
+    let texto = firmaObligatoria
+      ? `✅ Tu club de origen APROBÓ el ${nombreTipoPase(pase.tipo_pase)} de ${nombreJugador(pase)}. Ahora tiene que firmar el jugador: entrá a Trámites y compartile el link de firma (dura 72 hs).`
+      : `✅ Tu club de origen APROBÓ el ${nombreTipoPase(pase.tipo_pase)} de ${nombreJugador(pase)}. La liga no exige firma online: el pase ya está en la auditoría final de la federación.`;
     if (deudaLimpia) {
       texto +=
         deudaLimpia.modo === "cobrar"
@@ -983,13 +987,52 @@ export async function rescindirPrestamo(transferId: string) {
     return { error: "Solo el club que recibió el préstamo puede rescindirlo." };
   }
 
-  // Recargo configurado por la liga
+  // Recargo configurado por la liga (Paso 15): puede ser un monto fijo en $
+  // o un multiplicador de la tarifa de préstamo de la categoría del jugador.
   const { data: settings } = await supabase
     .from("pase_settings")
-    .select("recargo_rescision")
+    .select("recargo_rescision, recargo_modo")
     .eq("id", 1)
     .single();
-  const recargo = Number(settings?.recargo_rescision ?? 0);
+  const valorRecargo = Number(settings?.recargo_rescision ?? 0);
+  const modoRecargo: RecargoModo =
+    (settings as { recargo_modo?: string } | null)?.recargo_modo === "multiplicador"
+      ? "multiplicador"
+      : "fijo";
+
+  // Tarifa de préstamo de la categoría base del jugador (solo si es multiplicador)
+  let tarifaPrestamo = 0;
+  if (modoRecargo === "multiplicador" && valorRecargo > 1) {
+    try {
+      const admin = createLfsAdminClient();
+      const { data: catsJugador } = await admin
+        .from("player_categories")
+        .select("category_id, categories(level_hierarchy)")
+        .eq("player_id", pase.player_id);
+      const categoriaBase = (catsJugador ?? [])
+        .map((f) => ({
+          category_id: f.category_id as string,
+          nivel:
+            (f.categories as unknown as { level_hierarchy: number } | null)
+              ?.level_hierarchy ?? 999,
+        }))
+        .sort((a, b) => a.nivel - b.nivel)[0];
+      if (categoriaBase) {
+        const { data: reglaGeneral } = await admin
+          .from("transfer_fees")
+          .select("monto")
+          .eq("category_id", categoriaBase.category_id)
+          .is("competition_id", null)
+          .eq("tipo", "prestamo")
+          .maybeSingle();
+        tarifaPrestamo = Number(reglaGeneral?.monto ?? 0);
+      }
+    } catch {
+      // silencioso: sin tarifa, no hay recargo multiplicador
+    }
+  }
+
+  const recargo = calcularRecargoRescision(modoRecargo, valorRecargo, tarifaPrestamo);
 
   // El jugador vuelve al club de origen
   if (pase.from_club_id && pase.to_club_id) {
