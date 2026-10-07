@@ -14,6 +14,7 @@ import {
   Calendar,
   Award,
   MessageSquare,
+  Scale,
   User,
   type LucideIcon,
 } from "lucide-react";
@@ -46,7 +47,7 @@ const ITEMS: Record<RolNav, { fijos: ItemNav[]; mas: ItemNav[] }> = {
     mas: [
       { href: "/admin/equipos", label: "Equipos (Clubes)", icono: Users },
       { href: "/admin/colegiodearbitros", label: "Colegio de Árbitros", icono: Award },
-      { href: "/admin/tribunal/sanciones", label: "Tribunal", icono: Award },
+      { href: "/admin/tribunal/sanciones", label: "Tribunal", icono: Scale },
       { href: "/admin/mensajeria", label: "Mensajería", icono: MessageSquare },
       { href: "/admin/configuracion", label: "Configuración", icono: User },
     ],
@@ -60,6 +61,7 @@ const ITEMS: Record<RolNav, { fijos: ItemNav[]; mas: ItemNav[] }> = {
     ],
     mas: [
       { href: "/club/finanzas", label: "Finanzas y Pagos", icono: Wallet },
+      { href: "/club/tribunal", label: "Tribunal", icono: Scale },
       { href: "/club/mensajeria", label: "Mensajería LFS", icono: MessageSquare },
       { href: "/club/estadisticas", label: "Estadísticas", icono: Award },
       { href: "/club/configuracion", label: "Configuración", icono: User },
