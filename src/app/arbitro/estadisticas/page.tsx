@@ -1,29 +1,37 @@
-"use client";
+import { redirect } from "next/navigation";
+import { SquareChartGantt } from "lucide-react";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { obtenerMisEstadisticas } from "@/lib/actions/arbitros.actions";
+import { EstadisticasArbitroPanel } from "@/components/arbitros/EstadisticasArbitroPanel";
 
-import { BarChart3, TrendingUp } from "lucide-react";
+export const dynamic = "force-dynamic";
 
-export default function ArbitroEstadisticas() {
+/**
+ * MIS ESTADÍSTICAS (árbitro, Paso 16) — números reales calculados de los
+ * partidos y planillas que cargó: totales y desglose por torneo.
+ */
+export default async function ArbitroEstadisticas() {
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { total, porTorneo } = await obtenerMisEstadisticas();
+
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="border-b pb-4">
-        <h2 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
-          <BarChart3 className="w-7 h-7 text-[#F97316]" />
-          Mis Estadísticas de Desempeño
-        </h2>
-        <p className="text-slate-500 text-xs mt-0.5">Calificaciones promedio de los delegados y estadísticas de partidos dirigidos.</p>
+    <div className="flex flex-col gap-6 max-w-3xl mx-auto">
+      <div className="border-b border-slate-200 pb-4">
+        <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
+          <SquareChartGantt className="w-7 h-7 text-[#F97316]" />
+          Mis Estadísticas
+        </h1>
+        <p className="text-slate-500 text-xs mt-0.5">
+          Tus números salen de las planillas reales que cargaste — ni más ni menos.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 bg-orange-50 text-[#F97316] rounded-xl flex items-center justify-center">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[9px] font-bold text-slate-450 uppercase block">Calificación Promedio</span>
-            <span className="text-xl font-bold text-[#1A2A44]">9.2 / 10</span>
-          </div>
-        </div>
-      </div>
+      <EstadisticasArbitroPanel total={total} porTorneo={porTorneo} />
     </div>
   );
 }

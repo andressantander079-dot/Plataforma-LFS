@@ -1,38 +1,50 @@
-"use client";
+import { redirect } from "next/navigation";
+import { User } from "lucide-react";
+import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import {
+  obtenerMiPerfil,
+  obtenerMiDisponibilidad,
+  obtenerMisLiquidaciones,
+} from "@/lib/actions/arbitros.actions";
+import { PerfilArbitroForm } from "@/components/arbitros/PerfilArbitroForm";
+import { DisponibilidadArbitro } from "@/components/arbitros/DisponibilidadArbitro";
+import { MisLiquidaciones } from "@/components/arbitros/MisLiquidaciones";
 
-import { User, PenTool, Save } from "lucide-react";
+export const dynamic = "force-dynamic";
 
-export default function ArbitroPerfil() {
+/**
+ * MI PERFIL (árbitro, Paso 16) — edita foto, teléfono y firma digital real.
+ * Además: su disponibilidad (días que NO puede) y sus honorarios.
+ * El nivel y el estado los fija la liga desde el Colegio de Árbitros.
+ */
+export default async function ArbitroPerfil() {
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const [perfil, bloques, pagos] = await Promise.all([
+    obtenerMiPerfil(),
+    obtenerMiDisponibilidad(),
+    obtenerMisLiquidaciones(),
+  ]);
+
   return (
-    <div className="flex flex-col gap-6 max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="border-b pb-4">
-        <h2 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
+    <div className="flex flex-col gap-6 max-w-3xl mx-auto">
+      <div className="border-b border-slate-200 pb-4">
+        <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
           <User className="w-7 h-7 text-[#F97316]" />
-          Mi Perfil y Firma Digital
-        </h2>
-        <p className="text-slate-500 text-xs mt-0.5">Administra tus datos personales y registra tu firma digital táctil para actas.</p>
+          Mi Perfil
+        </h1>
+        <p className="text-slate-500 text-xs mt-0.5">
+          Tu foto, teléfono, firma digital, disponibilidad y honorarios.
+        </p>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col gap-6">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-slate-700">Nombre Completo</label>
-            <input type="text" defaultValue="Esteban Ortiz" disabled className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-semibold text-slate-500" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-slate-700">Categoría LFS</label>
-            <input type="text" defaultValue="Nacional A" disabled className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-semibold text-slate-500" />
-          </div>
-        </div>
-
-        <div className="border-t pt-4 flex flex-col gap-3">
-          <h3 className="font-serif text-sm font-bold text-[#1A2A44]">Firma Digital Registrada</h3>
-          <div className="p-8 border border-dashed rounded-xl bg-slate-50 flex flex-col items-center gap-3">
-            <PenTool className="w-8 h-8 text-slate-400" />
-            <p className="text-xs text-slate-400">Firma táctil registrada de forma segura encriptada con hash.</p>
-          </div>
-        </div>
-      </div>
+      <PerfilArbitroForm perfil={perfil} />
+      <DisponibilidadArbitro bloques={bloques} />
+      <MisLiquidaciones pagos={pagos} />
     </div>
   );
 }

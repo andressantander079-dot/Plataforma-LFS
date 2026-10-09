@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { ClipboardList, Calendar, MapPin, ChevronRight } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { obtenerEstadosPlanilla } from "@/lib/actions/planilla.actions";
+import { obtenerMisPlanillasHistorial } from "@/lib/actions/arbitros.actions";
+import { HistorialPlanillas } from "@/components/arbitros/HistorialPlanillas";
 
 /**
  * PLANILLAS DEL ÁRBITRO (listado)
@@ -37,6 +39,8 @@ export default async function PlanillasArbitro() {
   const nombreEquipo = new Map((equipos ?? []).map((e) => [e.id, e.name]));
 
   const estados = await obtenerEstadosPlanilla((partidos ?? []).map((p) => p.id));
+  // Historial read-only con resumen de eventos (Paso 16)
+  const historial = await obtenerMisPlanillasHistorial();
 
   const etiquetaEstado = (matchId: string) => {
     const estado = estados[matchId]?.status;
@@ -123,6 +127,8 @@ export default async function PlanillasArbitro() {
           );
         })}
       </ul>
+
+      <HistorialPlanillas items={historial} />
     </div>
   );
 }
