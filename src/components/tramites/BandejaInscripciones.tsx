@@ -492,3 +492,4 @@ export function BandejaInscripciones({ data }: { data: BandejaInscripcionesData 
     </div>
   );
 }
+
