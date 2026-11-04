@@ -131,9 +131,20 @@ export function FichaJugadorClub({ jugador }: { jugador: JugadorFila }) {
 
       {/* Checklist de documentación de inscripción */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-3 sm:col-span-2">
-        <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-          <FileText className="w-3.5 h-3.5" /> Documentación de inscripción
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5" /> Documentación de inscripción
+          </p>
+          {cargados.size < 4 ? (
+            <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+              En revisión ({cargados.size}/4 docs)
+            </span>
+          ) : (
+            <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+              Documentación completa (4/4)
+            </span>
+          )}
+        </div>
         <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {DOCUMENTOS_INSCRIPCION.map((doc) => {
             const cargado = cargados.has(doc.clave);

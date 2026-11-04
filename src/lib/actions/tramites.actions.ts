@@ -27,6 +27,7 @@ import {
 } from "@/lib/core/rules/tramitesRules";
 import type { EstadoPase } from "@/lib/core/rules/pasesRules";
 import { esEstadoTerminal } from "@/lib/core/rules/pasesRules";
+import { DOCUMENTOS_INSCRIPCION } from "@/lib/core/rules/jugadoresRules";
 
 /**
  * TRÁMITES — Acciones de servidor (Paso 15)
@@ -671,5 +672,204 @@ export async function cancelarPaseAdmin(transferId: string, motivo: string) {
   await auditar(supabase, user.id, "pase_cancelado", { estado: pase.status }, { transferId, motivo: motivo.trim() });
   revalidarTramites();
   revalidatePath(`/admin/tramites/pases/${transferId}`);
+  return { ok: true };
+}
+
+// ============================================================================
+// TRÁMITES DE INSCRIPCIÓN DE JUGADORES (Nuevos fichajes)
+// ============================================================================
+
+export interface InscripcionJugadorTramite {
+  playerId: string;
+  dni: string;
+  first_name: string;
+  last_name: string;
+  nombreCompleto: string;
+  fechaNacimiento: string | null;
+  fotoUrl: string | null;
+  status: "pendiente" | "activo" | "en_deuda" | "denegado";
+  documents: Record<string, string>;
+  documentosCargados: number;
+  documentosFaltantes: string[];
+  clubId: string;
+  clubNombre: string;
+  categoriaNombre: string;
+  createdAt: string;
+}
+
+export interface BandejaInscripcionesData {
+  inscripciones: InscripcionJugadorTramite[];
+  kpis: {
+    total: number;
+    pendientes: number;
+    enDeuda: number;
+    activos: number;
+    denegados: number;
+  };
+}
+
+/** Obtiene todos los jugadores inscriptos agrupados por trámite de fichaje con su estado y documentos. */
+export async function obtenerInscripcionesTramites(): Promise<BandejaInscripcionesData> {
+  const admin = createLfsAdminClient();
+
+  const { data: rows } = await admin
+    .from("player_categories")
+    .select(`
+      player_id,
+      club_id,
+      clubs:club_id ( id, name ),
+      categories:category_id ( id, name ),
+      players:player_id (
+        id,
+        dni,
+        first_name,
+        last_name,
+        fecha_nacimiento,
+        foto_path,
+        status,
+        documents,
+        created_at
+      )
+    `);
+
+  const urlFotos = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/fotos-jugadores/`;
+  const agrupados = new Map<string, InscripcionJugadorTramite>();
+
+  interface PlayerCatRow {
+    player_id: string;
+    club_id: string;
+    clubs: { id: string; name: string } | null;
+    categories: { id: string; name: string } | null;
+    players: {
+      id: string;
+      dni: string;
+      first_name: string;
+      last_name: string;
+      fecha_nacimiento: string | null;
+      foto_path: string | null;
+      status: string;
+      documents: Record<string, string> | null;
+      created_at: string;
+    } | null;
+  }
+
+  for (const r of (rows ?? []) as unknown as PlayerCatRow[]) {
+    if (!r.players) continue;
+    const pl = r.players;
+    const club = r.clubs;
+    const cat = r.categories;
+
+    const existing = agrupados.get(pl.id);
+    if (existing) {
+      if (cat?.name && !existing.categoriaNombre.includes(cat.name)) {
+        existing.categoriaNombre = `${existing.categoriaNombre}, ${cat.name}`;
+      }
+      continue;
+    }
+
+    const docs = (pl.documents ?? {}) as Record<string, string>;
+    const faltantes = DOCUMENTOS_INSCRIPCION.filter((d) => !docs[d.clave]).map((d) => d.nombre);
+    const cantCargados = DOCUMENTOS_INSCRIPCION.filter((d) => docs[d.clave]).length;
+
+    let normalizedStatus: "pendiente" | "activo" | "en_deuda" | "denegado" = "activo";
+    if (pl.status === "pendiente" || pl.status === "en_deuda" || pl.status === "denegado") {
+      normalizedStatus = pl.status;
+    }
+
+    agrupados.set(pl.id, {
+      playerId: pl.id,
+      dni: pl.dni,
+      first_name: pl.first_name,
+      last_name: pl.last_name,
+      nombreCompleto: `${pl.last_name}, ${pl.first_name}`,
+      fechaNacimiento: pl.fecha_nacimiento,
+      fotoUrl: pl.foto_path ? `${urlFotos}${pl.foto_path}` : null,
+      status: normalizedStatus,
+      documents: docs,
+      documentosCargados: cantCargados,
+      documentosFaltantes: faltantes,
+      clubId: club?.id ?? r.club_id,
+      clubNombre: club?.name ?? "Club",
+      categoriaNombre: cat?.name ?? "Sin categoría",
+      createdAt: pl.created_at,
+    });
+  }
+
+  const inscripciones = [...agrupados.values()].sort((a, b) => {
+    // Pendientes primero, luego en deuda, luego denegados, luego activos
+    const peso = (st: string) =>
+      st === "pendiente" ? 0 : st === "en_deuda" ? 1 : st === "denegado" ? 2 : 3;
+    if (peso(a.status) !== peso(b.status)) return peso(a.status) - peso(b.status);
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+
+  const kpis = {
+    total: inscripciones.length,
+    pendientes: inscripciones.filter((i) => i.status === "pendiente").length,
+    enDeuda: inscripciones.filter((i) => i.status === "en_deuda").length,
+    activos: inscripciones.filter((i) => i.status === "activo").length,
+    denegados: inscripciones.filter((i) => i.status === "denegado").length,
+  };
+
+  return { inscripciones, kpis };
+}
+
+/**
+ * Decisión de la federación sobre un jugador inscripto:
+ *  - 'activo': aprobado para planillas de juego.
+ *  - 'en_deuda': activo temporalmente hasta cierre de inscripción.
+ *  - 'denegado': rechazado, no puede ser convocado.
+ *  - 'pendiente': regresa a revisión.
+ */
+export async function cambiarEstadoInscripcionJugador(
+  playerId: string,
+  nuevoEstado: "activo" | "en_deuda" | "denegado" | "pendiente",
+  motivo?: string
+): Promise<{ ok: boolean; error?: string }> {
+  const { user } = await requerirAdmin();
+
+  const admin = createLfsAdminClient();
+  const { data: player, error: fetchErr } = await admin
+    .from("players")
+    .select("id, first_name, last_name, status")
+    .eq("id", playerId)
+    .single();
+
+  if (fetchErr || !player) {
+    return { ok: false, error: "El jugador no existe." };
+  }
+
+  const { error: dbError } = await admin
+    .from("players")
+    .update({ status: nuevoEstado })
+    .eq("id", playerId);
+
+  if (dbError) {
+    return { ok: false, error: `Error al actualizar estado del jugador: ${dbError.message}` };
+  }
+
+  // Notificar al club del jugador mediante aviso
+  const { data: pc } = await admin
+    .from("player_categories")
+    .select("club_id")
+    .eq("player_id", playerId)
+    .limit(1)
+    .maybeSingle();
+
+  if (pc?.club_id) {
+    const estadoLabels: Record<string, string> = {
+      activo: "APROBADA (Habilitado para planillas)",
+      en_deuda: "EN DEUDA (Habilitado temporalmente)",
+      denegado: "DENEGADA (No habilitado para planillas)",
+      pendiente: "EN REVISIÓN",
+    };
+    const texto = `📋 Inscripción de jugador: La federación actualizó el estado de ${player.last_name}, ${player.first_name} a ${estadoLabels[nuevoEstado] || nuevoEstado}.${motivo ? ` Motivo: ${motivo.trim()}` : ""}`;
+    await avisarClub(pc.club_id, texto, user.id);
+  }
+
+  revalidarTramites();
+  revalidatePath("/admin/tramites");
+  revalidatePath("/admin/equipos");
+  revalidatePath("/club/planteles");
   return { ok: true };
 }

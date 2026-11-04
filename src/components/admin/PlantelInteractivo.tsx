@@ -7,6 +7,8 @@ import { PanelInscribirJugador } from "@/components/admin/PanelInscribirJugador"
 import { PanelCredencialesClub } from "@/components/admin/PanelCredencialesClub";
 import { CeldaDocumento } from "@/components/admin/CeldaDocumento";
 
+import type { EstadoJugador } from "@/lib/core/rules/jugadoresRules";
+
 /**
  * PLANTEL INTERACTIVO
  * La tabla, el panel de inscripción y el de credenciales viven
@@ -17,7 +19,7 @@ export interface JugadorPlantel {
   id: string;
   dni: string;
   fullName: string;
-  status: "activo" | "inactivo";
+  status: EstadoJugador;
   categories: string[];
   documents: Record<string, string>;
 }
@@ -156,15 +158,31 @@ export function PlantelInteractivo({
                     </td>
                   ))}
                   <td className="py-4 px-3 text-center">
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                        player.status === "activo"
-                          ? "bg-green-50 text-green-700"
-                          : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {player.status === "activo" ? "Activo" : "Inactivo"}
-                    </span>
+                    {player.status === "activo" && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Activo
+                      </span>
+                    )}
+                    {player.status === "en_deuda" && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200">
+                        En deuda
+                      </span>
+                    )}
+                    {player.status === "pendiente" && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                        Pendiente LFS
+                      </span>
+                    )}
+                    {player.status === "denegado" && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                        Denegado
+                      </span>
+                    )}
+                    {player.status === "inactivo" && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                        Inactivo
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -28,6 +28,64 @@ export const DOCUMENTOS_INSCRIPCION = [
 
 export type ClaveDocumentoInscripcion = (typeof DOCUMENTOS_INSCRIPCION)[number]["clave"];
 
+export type EstadoJugador = "pendiente" | "activo" | "en_deuda" | "denegado" | "inactivo";
+
+/**
+ * ¿Puede este jugador ser incluido en la planilla del partido?
+ *  · 'activo': aprobado por la federación.
+ *  · 'en_deuda': habilitado temporalmente con deuda hasta el cierre del período.
+ *  · 'pendiente', 'denegado', 'inactivo': NO pueden jugar.
+ */
+export function puedeJugarEnPlanilla(status: EstadoJugador | string | null | undefined): boolean {
+  return status === "activo" || status === "en_deuda";
+}
+
+export function estadoJugadorInfo(status: EstadoJugador | string | null | undefined): {
+  clave: EstadoJugador;
+  label: string;
+  badgeClase: string;
+  descripcion: string;
+} {
+  switch (status) {
+    case "en_deuda":
+      return {
+        clave: "en_deuda",
+        label: "En deuda",
+        badgeClase: "bg-orange-100 text-orange-900 border-orange-200",
+        descripcion: "Habilitado temporalmente hasta que se cierre el período de inscripción.",
+      };
+    case "denegado":
+      return {
+        clave: "denegado",
+        label: "Denegado",
+        badgeClase: "bg-red-100 text-red-800 border-red-200",
+        descripcion: "Inscripción denegada por la federación. No puede ser incluido en planillas.",
+      };
+    case "inactivo":
+      return {
+        clave: "inactivo",
+        label: "Inactivo",
+        badgeClase: "bg-slate-100 text-slate-600 border-slate-200",
+        descripcion: "Jugador dado de baja o inactivo.",
+      };
+    case "pendiente":
+      return {
+        clave: "pendiente",
+        label: "Pendiente LFS",
+        badgeClase: "bg-amber-100 text-amber-900 border-amber-200",
+        descripcion: "Enviado a Trámites en la federación. Esperando aprobación.",
+      };
+    case "activo":
+    default:
+      return {
+        clave: "activo",
+        label: "Activo",
+        badgeClase: "bg-green-100 text-green-800 border-green-200",
+        descripcion: "Aprobado por la federación. Habilitado para disputar partidos.",
+      };
+  }
+}
+
 /** Cuántos de los documentos obligatorios tiene cargados el jugador (0 a 4). */
 export function contarDocumentosRequeridos(
   documents: Record<string, string> | null | undefined

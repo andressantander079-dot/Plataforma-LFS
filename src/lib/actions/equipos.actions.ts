@@ -62,7 +62,7 @@ async function requireAdminOClubDuenio(clubId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { supabase, error: "No hay sesión activa. Iniciá sesión nuevamente." };
+    return { supabase, error: "No hay sesión activa. Iniciá sesión nuevamente.", esAdmin: false };
   }
 
   const { data: profile } = await supabase
@@ -72,14 +72,15 @@ async function requireAdminOClubDuenio(clubId: string) {
     .single();
 
   if (profile?.role === "admin") {
-    return { supabase, error: null };
+    return { supabase, error: null, esAdmin: true };
   }
   if (profile?.role === "club" && profile.club_id === clubId) {
-    return { supabase, error: null };
+    return { supabase, error: null, esAdmin: false };
   }
   return {
     supabase,
     error: "Solo la liga o el propio club pueden inscribir jugadores en este plantel.",
+    esAdmin: false,
   };
 }
 
@@ -341,13 +342,15 @@ export async function inscribirJugador(
     return { ok: false, error: "La foto no puede pesar más de 5 MB." };
   }
 
-  // Documentos OBLIGATORIOS de inscripción (Paso 10B):
-  // DNI + CEMAD médico + CEMAD de autorización + comprobante de federación
+  // Documentos de inscripción (Paso 10B):
+  // DNI + CEMAD médico + CEMAD de autorización + comprobante de federación.
+  // Si no se adjuntan todos en el momento, se aceptan los disponibles y el jugador
+  // se inscribe pasando a ser revisado por la federación con la documentación faltante.
   const documentosArchivos: { clave: string; archivo: File }[] = [];
   for (const doc of DOCUMENTOS_INSCRIPCION) {
     const archivo = formData.get(`doc_${doc.clave}`) as File | null;
     if (!archivo || archivo.size === 0) {
-      return { ok: false, error: `Falta el documento obligatorio: ${doc.nombre}.` };
+      continue;
     }
     const esImagen = archivo.type.startsWith("image/");
     const esPdf = archivo.type === "application/pdf";
@@ -361,7 +364,7 @@ export async function inscribirJugador(
   }
 
   // Paso 10: la liga inscribe en cualquier club; el club solo en el suyo
-  const { supabase, error } = await requireAdminOClubDuenio(clubId);
+  const { supabase, error, esAdmin } = await requireAdminOClubDuenio(clubId);
   if (error) return { ok: false, error };
 
   // Validación por año de nacimiento — REGLA ESTRICTA (Paso 10B): si las
@@ -400,10 +403,19 @@ export async function inscribirJugador(
     };
   }
 
-  // 1. Crear el jugador (el DNI es único en toda la liga)
+  // 1. Crear el jugador (el DNI es único en toda la liga).
+  // Las inscripciones enviadas por los clubes quedan en estado "pendiente"
+  // para ser revisadas y dictaminadas (aprobar / en deuda / denegar) en Trámites por la federación.
+  const statusInicial = esAdmin ? "activo" : "pendiente";
   const { data: player, error: playerError } = await supabase
     .from("players")
-    .insert({ dni, first_name, last_name, fecha_nacimiento })
+    .insert({
+      dni,
+      first_name,
+      last_name,
+      fecha_nacimiento,
+      status: statusInicial,
+    })
     .select("id")
     .single();
 
@@ -501,6 +513,7 @@ export async function inscribirJugador(
 
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
   revalidatePath(`/club/planteles`);
+  revalidatePath(`/admin/tramites`);
   return { ok: true };
 }
 
@@ -534,6 +547,7 @@ export async function crearPlantel(
 
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
   revalidatePath(`/club/planteles`);
+  revalidatePath(`/admin/tramites`);
   return { ok: true };
 }
 

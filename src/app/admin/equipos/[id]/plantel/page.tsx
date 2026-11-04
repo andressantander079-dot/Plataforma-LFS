@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import type { EstadoJugador } from "@/lib/core/rules/jugadoresRules";
 import {
   PlantelInteractivo,
   type JugadorPlantel,
@@ -21,7 +22,7 @@ interface PlayerRow {
     dni: string;
     first_name: string;
     last_name: string;
-    status: "activo" | "inactivo";
+    status: EstadoJugador;
     documents: Record<string, string> | null;
   } | null;
   categories: { id: string; name: string } | null;

@@ -255,15 +255,24 @@ export function PlantelClubInteractivo({
                             </span>
                           </td>
                           <td className="py-2.5 px-2 text-center">
-                            <span
-                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                                j.status === "activo"
-                                  ? "text-green-700 bg-green-100"
-                                  : "text-red-600 bg-red-100"
-                              }`}
-                            >
-                              {j.status === "activo" ? "Activo" : "Inactivo"}
-                            </span>
+                            {j.documentosCargados.length < 4 ? (
+                              <span
+                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-md text-amber-800 bg-amber-100 inline-block"
+                                title="Inscripto con documentación faltante — en revisión por la federación"
+                              >
+                                En revisión
+                              </span>
+                            ) : (
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                                  j.status === "activo"
+                                    ? "text-green-700 bg-green-100"
+                                    : "text-red-600 bg-red-100"
+                                }`}
+                              >
+                                {j.status === "activo" ? "Activo" : "Inactivo"}
+                              </span>
+                            )}
                           </td>
                           <td className="py-2.5 px-2 text-center">
                             <button

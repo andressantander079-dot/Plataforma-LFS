@@ -5,6 +5,8 @@ import {
   anioDeFecha,
   categoriaSugeridaPorAnio,
   validarCategoriasPorAnio,
+  contarDocumentosRequeridos,
+  documentosFaltantes,
   type CategoriaConRango,
 } from "../lib/core/rules/jugadoresRules";
 import {
@@ -240,5 +242,42 @@ describe("generarTextoTutor", () => {
     expect(texto).toContain("madre");
     expect(texto).toContain("González, Rocío");
     expect(texto).toContain("30111222");
+  });
+});
+
+// ============================================================================
+// Documentación obligatoria de inscripción (Paso 10B)
+// ============================================================================
+
+describe("contarDocumentosRequeridos y documentosFaltantes", () => {
+  it("sin documentos cargados cuenta 0 y lista los 4 faltantes", () => {
+    expect(contarDocumentosRequeridos(null)).toBe(0);
+    expect(contarDocumentosRequeridos({})).toBe(0);
+    const faltantes = documentosFaltantes({});
+    expect(faltantes).toHaveLength(4);
+    expect(faltantes).toContain("DNI (foto o escaneo)");
+    expect(faltantes).toContain("CEMAD médico (aptitud física)");
+    expect(faltantes).toContain("CEMAD de autorización");
+    expect(faltantes).toContain("Comprobante de pago de federación");
+  });
+
+  it("con 1 documento cargado cuenta 1 y lista los 3 restantes", () => {
+    const docs = { dni: "path/al/dni.pdf" };
+    expect(contarDocumentosRequeridos(docs)).toBe(1);
+    const faltantes = documentosFaltantes(docs);
+    expect(faltantes).toHaveLength(3);
+    expect(faltantes).not.toContain("DNI (foto o escaneo)");
+    expect(faltantes).toContain("CEMAD médico (aptitud física)");
+  });
+
+  it("con los 4 documentos cargados cuenta 4 y no hay faltantes", () => {
+    const docs = {
+      dni: "path/dni.pdf",
+      cemad_medico: "path/medico.pdf",
+      cemad_autorizacion: "path/autorizacion.pdf",
+      comprobante_federacion: "path/pago.pdf",
+    };
+    expect(contarDocumentosRequeridos(docs)).toBe(4);
+    expect(documentosFaltantes(docs)).toEqual([]);
   });
 });
