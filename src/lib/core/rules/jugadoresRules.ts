@@ -28,12 +28,124 @@ export const DOCUMENTOS_INSCRIPCION = [
 
 export type ClaveDocumentoInscripcion = (typeof DOCUMENTOS_INSCRIPCION)[number]["clave"];
 
+export type EstadoJugador = "pendiente" | "activo" | "en_deuda" | "denegado" | "inactivo";
+
+/**
+ * ¿Puede este jugador ser incluido en la planilla del partido?
+ *  · 'activo': aprobado por la federación.
+ *  · 'en_deuda': habilitado temporalmente con deuda hasta el cierre del período.
+ *  · 'pendiente', 'denegado', 'inactivo': NO pueden jugar.
+ */
+export function puedeJugarEnPlanilla(status: EstadoJugador | string | null | undefined): boolean {
+  return status === "activo" || status === "en_deuda";
+}
+
+export function estadoJugadorInfo(status: EstadoJugador | string | null | undefined): {
+  clave: EstadoJugador;
+  label: string;
+  badgeClase: string;
+  descripcion: string;
+} {
+  switch (status) {
+    case "en_deuda":
+      return {
+        clave: "en_deuda",
+        label: "En deuda",
+        badgeClase: "bg-orange-100 text-orange-900 border-orange-200",
+        descripcion: "Habilitado temporalmente hasta que se cierre el período de inscripción.",
+      };
+    case "denegado":
+      return {
+        clave: "denegado",
+        label: "Denegado",
+        badgeClase: "bg-red-100 text-red-800 border-red-200",
+        descripcion: "Inscripción denegada por la federación. No puede ser incluido en planillas.",
+      };
+    case "inactivo":
+      return {
+        clave: "inactivo",
+        label: "Inactivo",
+        badgeClase: "bg-slate-100 text-slate-600 border-slate-200",
+        descripcion: "Jugador dado de baja o inactivo.",
+      };
+    case "pendiente":
+      return {
+        clave: "pendiente",
+        label: "Pendiente LFS",
+        badgeClase: "bg-amber-100 text-amber-900 border-amber-200",
+        descripcion: "Enviado a Trámites en la federación. Esperando aprobación.",
+      };
+    case "activo":
+    default:
+      return {
+        clave: "activo",
+        label: "Activo",
+        badgeClase: "bg-green-100 text-green-800 border-green-200",
+        descripcion: "Aprobado por la federación. Habilitado para disputar partidos.",
+      };
+  }
+}
+
 /** Cuántos de los documentos obligatorios tiene cargados el jugador (0 a 4). */
 export function contarDocumentosRequeridos(
   documents: Record<string, string> | null | undefined
 ): number {
   const docs = documents ?? {};
   return DOCUMENTOS_INSCRIPCION.filter((d) => docs[d.clave]).length;
+}
+
+/**
+ * Tipos de documento que se pueden subir a la ficha de un jugador: los 4 de la
+ * federación (Paso 10B) más los 3 del Paso 3, que se conservan para no perder
+ * archivos de jugadores cargados antes.
+ */
+export type TipoDocumentoPlantel = ClaveDocumentoInscripcion | "medical" | "ddjj" | "photo";
+
+/** Resumen del plantel por estado: alimenta los contadores de la pantalla del admin. */
+export interface ResumenPlantel {
+  total: number;
+  pendientes: number;
+  enDeuda: number;
+  activos: number;
+  denegados: number;
+  inactivos: number;
+  /** Pueden ir a planilla: activos + en deuda. */
+  habilitados: number;
+  /** Jugadores vigentes (no inactivos) con menos de los 4 documentos obligatorios. */
+  conDocsIncompletos: number;
+}
+
+export function resumirPlantel(
+  jugadores: {
+    status: EstadoJugador | string | null | undefined;
+    documents: Record<string, string> | null | undefined;
+  }[]
+): ResumenPlantel {
+  const r: ResumenPlantel = {
+    total: jugadores.length,
+    pendientes: 0,
+    enDeuda: 0,
+    activos: 0,
+    denegados: 0,
+    inactivos: 0,
+    habilitados: 0,
+    conDocsIncompletos: 0,
+  };
+
+  for (const j of jugadores) {
+    const estado = estadoJugadorInfo(j.status).clave;
+    if (estado === "pendiente") r.pendientes++;
+    else if (estado === "en_deuda") r.enDeuda++;
+    else if (estado === "denegado") r.denegados++;
+    else if (estado === "inactivo") r.inactivos++;
+    else r.activos++;
+
+    if (puedeJugarEnPlanilla(estado)) r.habilitados++;
+    if (estado !== "inactivo" && contarDocumentosRequeridos(j.documents) < DOCUMENTOS_INSCRIPCION.length) {
+      r.conDocsIncompletos++;
+    }
+  }
+  return r;
 }
 
 /** Nombres de los documentos obligatorios que todavía faltan. */

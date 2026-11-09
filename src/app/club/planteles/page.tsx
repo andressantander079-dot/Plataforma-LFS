@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AlertCircle } from "lucide-react";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import type { EstadoJugador } from "@/lib/core/rules/jugadoresRules";
 import {
   PlantelClubInteractivo,
   type PlantelUI,
@@ -24,7 +25,7 @@ interface PlayerRow {
     dni: string;
     first_name: string;
     last_name: string;
-    status: "activo" | "inactivo";
+    status: EstadoJugador;
     fecha_nacimiento: string | null;
     foto_path: string | null;
     documents: Record<string, string> | null;
@@ -118,6 +119,7 @@ export default async function ClubPlanteles() {
   const jugadoresPorCategoria = new Map<string, JugadorFila[]>();
   for (const row of (rows ?? []) as unknown as PlayerRow[]) {
     if (!row.players) continue;
+    const docsMap = (row.players.documents as Record<string, string>) ?? {};
     const lista = jugadoresPorCategoria.get(row.category_id) ?? [];
     lista.push({
       id: row.players.id,
@@ -126,9 +128,8 @@ export default async function ClubPlanteles() {
       status: row.players.status,
       fechaNacimiento: row.players.fecha_nacimiento,
       fotoUrl: row.players.foto_path ? `${urlFotos}${row.players.foto_path}` : null,
-      documentosCargados: Object.keys(
-        (row.players.documents as Record<string, string>) ?? {}
-      ),
+      documentosCargados: Object.keys(docsMap),
+      documents: docsMap,
     });
     jugadoresPorCategoria.set(row.category_id, lista);
   }

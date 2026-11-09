@@ -396,7 +396,7 @@ export async function obtenerConvocables(
       "player_id, players!inner(id, first_name, last_name, dni, status), categories!inner(name, level_hierarchy)"
     )
     .eq("club_id", team.club_id)
-    .eq("players.status", "activo")
+    .in("players.status", ["activo", "en_deuda"])
     .lte("categories.level_hierarchy", catEquipo.level_hierarchy);
 
   if (error) return { error: "No se pudo cargar el plantel." };
@@ -409,13 +409,14 @@ export async function obtenerConvocables(
       first_name: string;
       last_name: string;
       dni: string;
+      status: string;
     };
     const c = r.categories as unknown as { name: string; level_hierarchy: number };
     const actual = porJugador.get(p.id);
     if (!actual || c.level_hierarchy > actual.nivel) {
       porJugador.set(p.id, {
         playerId: p.id,
-        nombre: `${p.last_name}, ${p.first_name}`,
+        nombre: `${p.last_name}, ${p.first_name}${p.status === "en_deuda" ? " (En deuda)" : ""}`,
         dni: p.dni,
         categoria: c.name,
         nivel: c.level_hierarchy,
@@ -530,6 +531,30 @@ export async function convocarJugador(
   // Regla de categorías (validación del lado del servidor)
   const regla = await cumpleReglaCategorias(supabase, teamId, playerId);
   if (!regla.ok) return { error: regla.error };
+
+  // Habilitación reglamentaria de federación:
+  // Solo los jugadores con estado "activo" o "en_deuda" pueden jugar
+  const { data: jugadorHabilitacion } = await supabase
+    .from("players")
+    .select("status, first_name, last_name")
+    .eq("id", playerId)
+    .single();
+
+  if (!jugadorHabilitacion || !["activo", "en_deuda"].includes(jugadorHabilitacion.status)) {
+    if (jugadorHabilitacion?.status === "pendiente") {
+      return {
+        error:
+          "No se puede convocar: la inscripción del jugador está pendiente de aprobación por la federación en Trámites.",
+      };
+    }
+    if (jugadorHabilitacion?.status === "denegado") {
+      return {
+        error:
+          "No se puede convocar: la inscripción del jugador fue denegada por la federación.",
+      };
+    }
+    return { error: "No se puede convocar: el jugador no está habilitado." };
+  }
 
   // Disciplina automática: un suspendido no se puede convocar
   const { data: partido } = await supabase
@@ -754,6 +779,29 @@ export async function arbitroAgregarJugador(
 
   const regla = await cumpleReglaCategorias(supabase, teamId, playerId);
   if (!regla.ok) return { error: regla.error };
+
+  // Habilitación reglamentaria de federación:
+  const { data: jugadorHabilitacion } = await supabase
+    .from("players")
+    .select("status, first_name, last_name")
+    .eq("id", playerId)
+    .single();
+
+  if (!jugadorHabilitacion || !["activo", "en_deuda"].includes(jugadorHabilitacion.status)) {
+    if (jugadorHabilitacion?.status === "pendiente") {
+      return {
+        error:
+          "No se puede agregar: la inscripción del jugador está pendiente de aprobación por la federación.",
+      };
+    }
+    if (jugadorHabilitacion?.status === "denegado") {
+      return {
+        error:
+          "No se puede agregar: la inscripción del jugador fue denegada por la federación.",
+      };
+    }
+    return { error: "No se puede agregar: el jugador no está habilitado." };
+  }
 
   // Disciplina automática: el árbitro tampoco puede agregar suspendidos
   if (match?.competition_id) {

@@ -5,6 +5,9 @@ import {
   anioDeFecha,
   categoriaSugeridaPorAnio,
   validarCategoriasPorAnio,
+  contarDocumentosRequeridos,
+  documentosFaltantes,
+  resumirPlantel,
   type CategoriaConRango,
 } from "../lib/core/rules/jugadoresRules";
 import {
@@ -240,5 +243,115 @@ describe("generarTextoTutor", () => {
     expect(texto).toContain("madre");
     expect(texto).toContain("González, Rocío");
     expect(texto).toContain("30111222");
+  });
+});
+
+// ============================================================================
+// Documentación obligatoria de inscripción (Paso 10B)
+// ============================================================================
+
+describe("contarDocumentosRequeridos y documentosFaltantes", () => {
+  it("sin documentos cargados cuenta 0 y lista los 4 faltantes", () => {
+    expect(contarDocumentosRequeridos(null)).toBe(0);
+    expect(contarDocumentosRequeridos({})).toBe(0);
+    const faltantes = documentosFaltantes({});
+    expect(faltantes).toHaveLength(4);
+    expect(faltantes).toContain("DNI (foto o escaneo)");
+    expect(faltantes).toContain("CEMAD médico (aptitud física)");
+    expect(faltantes).toContain("CEMAD de autorización");
+    expect(faltantes).toContain("Comprobante de pago de federación");
+  });
+
+  it("con 1 documento cargado cuenta 1 y lista los 3 restantes", () => {
+    const docs = { dni: "path/al/dni.pdf" };
+    expect(contarDocumentosRequeridos(docs)).toBe(1);
+    const faltantes = documentosFaltantes(docs);
+    expect(faltantes).toHaveLength(3);
+    expect(faltantes).not.toContain("DNI (foto o escaneo)");
+    expect(faltantes).toContain("CEMAD médico (aptitud física)");
+  });
+
+  it("con los 4 documentos cargados cuenta 4 y no hay faltantes", () => {
+    const docs = {
+      dni: "path/dni.pdf",
+      cemad_medico: "path/medico.pdf",
+      cemad_autorizacion: "path/autorizacion.pdf",
+      comprobante_federacion: "path/pago.pdf",
+    };
+    expect(contarDocumentosRequeridos(docs)).toBe(4);
+    expect(documentosFaltantes(docs)).toEqual([]);
+  });
+});
+
+describe("Plantel: resumirPlantel (contadores de la pantalla del admin)", () => {
+  const DOCS_4 = {
+    dni: "a",
+    cemad_medico: "b",
+    cemad_autorizacion: "c",
+    comprobante_federacion: "d",
+  };
+
+  it("un plantel vacío da todo en cero", () => {
+    expect(resumirPlantel([])).toEqual({
+      total: 0,
+      pendientes: 0,
+      enDeuda: 0,
+      activos: 0,
+      denegados: 0,
+      inactivos: 0,
+      habilitados: 0,
+      conDocsIncompletos: 0,
+    });
+  });
+
+  it("cuenta cada estado por separado", () => {
+    const r = resumirPlantel([
+      { status: "pendiente", documents: {} },
+      { status: "pendiente", documents: {} },
+      { status: "en_deuda", documents: DOCS_4 },
+      { status: "activo", documents: DOCS_4 },
+      { status: "denegado", documents: {} },
+      { status: "inactivo", documents: {} },
+    ]);
+    expect(r.total).toBe(6);
+    expect(r.pendientes).toBe(2);
+    expect(r.enDeuda).toBe(1);
+    expect(r.activos).toBe(1);
+    expect(r.denegados).toBe(1);
+    expect(r.inactivos).toBe(1);
+  });
+
+  it("habilitados = activos + en deuda (los únicos que van a planilla)", () => {
+    const r = resumirPlantel([
+      { status: "activo", documents: DOCS_4 },
+      { status: "en_deuda", documents: {} },
+      { status: "pendiente", documents: DOCS_4 },
+      { status: "denegado", documents: DOCS_4 },
+    ]);
+    expect(r.habilitados).toBe(2);
+  });
+
+  it("los inactivos no cuentan como documentación incompleta", () => {
+    const r = resumirPlantel([
+      { status: "activo", documents: { dni: "a" } },
+      { status: "inactivo", documents: {} },
+    ]);
+    expect(r.conDocsIncompletos).toBe(1);
+  });
+
+  it("tolera documents null y estados desconocidos (se tratan como activo)", () => {
+    const r = resumirPlantel([
+      { status: null, documents: null },
+      { status: "raro", documents: undefined },
+    ]);
+    expect(r.activos).toBe(2);
+    expect(r.conDocsIncompletos).toBe(2);
+  });
+
+  it("los documentos viejos del Paso 3 no cuentan como los 4 de la federación", () => {
+    const r = resumirPlantel([
+      { status: "activo", documents: { medical: "x", ddjj: "y", photo: "z" } },
+    ]);
+    expect(r.conDocsIncompletos).toBe(1);
   });
 });

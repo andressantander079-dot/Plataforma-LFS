@@ -9,6 +9,12 @@ import {
   DOCUMENTOS_INSCRIPCION,
   type CategoriaConRango,
 } from "@/lib/core/rules/jugadoresRules";
+import {
+  InscripcionJugadorInputSchema,
+  type ActionResponse,
+  type InscripcionJugadorInput,
+  type PlayerStatus,
+} from "@/lib/core/rules/pasesRules";
 
 /**
  * ACCIONES DEL MÓDULO EQUIPOS (Pasos 2 y 4)
@@ -62,7 +68,7 @@ async function requireAdminOClubDuenio(clubId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { supabase, error: "No hay sesión activa. Iniciá sesión nuevamente." };
+    return { supabase, error: "No hay sesión activa. Iniciá sesión nuevamente.", esAdmin: false };
   }
 
   const { data: profile } = await supabase
@@ -72,14 +78,15 @@ async function requireAdminOClubDuenio(clubId: string) {
     .single();
 
   if (profile?.role === "admin") {
-    return { supabase, error: null };
+    return { supabase, error: null, esAdmin: true };
   }
   if (profile?.role === "club" && profile.club_id === clubId) {
-    return { supabase, error: null };
+    return { supabase, error: null, esAdmin: false };
   }
   return {
     supabase,
     error: "Solo la liga o el propio club pueden inscribir jugadores en este plantel.",
+    esAdmin: false,
   };
 }
 
@@ -341,13 +348,15 @@ export async function inscribirJugador(
     return { ok: false, error: "La foto no puede pesar más de 5 MB." };
   }
 
-  // Documentos OBLIGATORIOS de inscripción (Paso 10B):
-  // DNI + CEMAD médico + CEMAD de autorización + comprobante de federación
+  // Documentos de inscripción (Paso 10B):
+  // DNI + CEMAD médico + CEMAD de autorización + comprobante de federación.
+  // Si no se adjuntan todos en el momento, se aceptan los disponibles y el jugador
+  // se inscribe pasando a ser revisado por la federación con la documentación faltante.
   const documentosArchivos: { clave: string; archivo: File }[] = [];
   for (const doc of DOCUMENTOS_INSCRIPCION) {
     const archivo = formData.get(`doc_${doc.clave}`) as File | null;
     if (!archivo || archivo.size === 0) {
-      return { ok: false, error: `Falta el documento obligatorio: ${doc.nombre}.` };
+      continue;
     }
     const esImagen = archivo.type.startsWith("image/");
     const esPdf = archivo.type === "application/pdf";
@@ -361,7 +370,7 @@ export async function inscribirJugador(
   }
 
   // Paso 10: la liga inscribe en cualquier club; el club solo en el suyo
-  const { supabase, error } = await requireAdminOClubDuenio(clubId);
+  const { supabase, error, esAdmin } = await requireAdminOClubDuenio(clubId);
   if (error) return { ok: false, error };
 
   // Validación por año de nacimiento — REGLA ESTRICTA (Paso 10B): si las
@@ -400,10 +409,19 @@ export async function inscribirJugador(
     };
   }
 
-  // 1. Crear el jugador (el DNI es único en toda la liga)
+  // 1. Crear el jugador (el DNI es único en toda la liga).
+  // Las inscripciones enviadas por los clubes quedan en estado "pendiente"
+  // para ser revisadas y dictaminadas (aprobar / en deuda / denegar) en Trámites por la federación.
+  const statusInicial = esAdmin ? "activo" : "pendiente";
   const { data: player, error: playerError } = await supabase
     .from("players")
-    .insert({ dni, first_name, last_name, fecha_nacimiento })
+    .insert({
+      dni,
+      first_name,
+      last_name,
+      fecha_nacimiento,
+      status: statusInicial,
+    })
     .select("id")
     .single();
 
@@ -501,7 +519,110 @@ export async function inscribirJugador(
 
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
   revalidatePath(`/club/planteles`);
+  revalidatePath(`/admin/tramites`);
   return { ok: true };
+}
+
+
+// ---------- INSCRIPCIÓN DEL CLUB VÍA RPC (Fase 2) ----------
+// Camino exclusivo del panel del club: la base valida todo (sesión, DNI, edad,
+// categorías) dentro de la función inscribir_jugador_club y deja al jugador en
+// estado 'pendiente' para que lo dictamine la federación. La foto se sube ANTES
+// de llamar a la función, por eso cualquier fallo borra la foto del bucket
+// (sin esto quedarían archivos huérfanos). Se usa el cliente autenticado normal:
+// nunca service-role.
+
+interface InscribirJugadorRpcResult {
+  success: boolean;
+  player_id?: string;
+  status?: "pendiente";
+  message?: string;
+  error?: string;
+  code?: "REQUIRES_TRANSFER";
+  existing_club_id?: string;
+  existing_club_name?: string;
+}
+
+export async function inscribirJugadorClubAction(
+  input: InscripcionJugadorInput
+): Promise<
+  ActionResponse<{
+    playerId?: string;
+    status?: PlayerStatus;
+    existingClubName?: string;
+    existingClubId?: string;
+  }>
+> {
+  const supabase = await createLfsServerClient();
+
+  // Borra la foto ya subida si la inscripción no prosperó (nunca rompe la respuesta)
+  async function rollbackPhoto(path?: string) {
+    if (!path || !path.trim()) return;
+    try {
+      await supabase.storage.from("fotos-jugadores").remove([path]);
+    } catch {
+      // silencioso: no hay nada más que hacer si el borrado falla
+    }
+  }
+
+  const parsed = InscripcionJugadorInputSchema.safeParse(input);
+  if (!parsed.success) {
+    await rollbackPhoto(input?.foto_path);
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Los datos del jugador no son válidos.",
+    };
+  }
+  const datos = parsed.data;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    await rollbackPhoto(datos.foto_path);
+    return { success: false, error: "No hay sesión activa. Iniciá sesión nuevamente." };
+  }
+
+  const playerId = datos.player_id ?? crypto.randomUUID();
+
+  let rpcData: InscribirJugadorRpcResult | null = null;
+  let rpcFailed = false;
+  try {
+    const res = await supabase.rpc("inscribir_jugador_club", {
+      p_player_id: playerId,
+      p_dni: datos.dni,
+      p_first_name: datos.first_name,
+      p_last_name: datos.last_name,
+      p_fecha_nacimiento: datos.fecha_nacimiento,
+      p_foto_path: datos.foto_path,
+      p_category_ids: datos.category_ids,
+    });
+    rpcFailed = Boolean(res.error);
+    rpcData = (res.data as InscribirJugadorRpcResult | null) ?? null;
+  } catch {
+    rpcFailed = true;
+  }
+
+  // Error de red / SQL, o la función respondió success:false → deshacer la foto
+  if (rpcFailed || !rpcData || rpcData.success !== true) {
+    await rollbackPhoto(datos.foto_path);
+    if (rpcFailed || !rpcData) {
+      return { success: false, error: "No se pudo inscribir al jugador. Probá de nuevo." };
+    }
+    return {
+      success: false,
+      error: rpcData.error ?? "No se pudo inscribir al jugador.",
+      code: rpcData.code,
+      data: {
+        existingClubName: rpcData.existing_club_name,
+        existingClubId: rpcData.existing_club_id,
+      },
+    };
+  }
+
+  revalidatePath("/club/planteles");
+  revalidatePath("/club/dashboard");
+  return { success: true, data: { playerId: rpcData.player_id, status: "pendiente" } };
 }
 
 
@@ -534,6 +655,7 @@ export async function crearPlantel(
 
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
   revalidatePath(`/club/planteles`);
+  revalidatePath(`/admin/tramites`);
   return { ok: true };
 }
 

@@ -39,11 +39,13 @@ export function PanelInscribirJugador({
 }: Props) {
   const router = useRouter();
   const inputFotoRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const [categoriaId, setCategoriaId] = useState<string>(categoriaFija?.id ?? "");
   const [foto, setFoto] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   const [documentos, setDocumentos] = useState<Record<string, File | null>>({});
+  const [confirmacionFaltantes, setConfirmacionFaltantes] = useState<string[] | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
 
@@ -51,11 +53,17 @@ export function PanelInscribirJugador({
   useEffect(() => {
     if (!abierto) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCerrar();
+      if (e.key === "Escape") {
+        if (confirmacionFaltantes) {
+          setConfirmacionFaltantes(null);
+        } else {
+          onCerrar();
+        }
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [abierto, onCerrar]);
+  }, [abierto, confirmacionFaltantes, onCerrar]);
 
   // Al abrir el panel con categoría fija, preseleccionarla
   useEffect(() => {
@@ -65,6 +73,7 @@ export function PanelInscribirJugador({
       setFotoPreview(null);
       setDocumentos({});
       setSubmitError(null);
+      setConfirmacionFaltantes(null);
     }
   }, [abierto, categoriaFija]);
 
@@ -72,6 +81,42 @@ export function PanelInscribirJugador({
     if (fotoPreview) URL.revokeObjectURL(fotoPreview);
     setFoto(archivo);
     setFotoPreview(archivo ? URL.createObjectURL(archivo) : null);
+  }
+
+  async function ejecutarInscripcion() {
+    if (!formRef.current) return;
+    setConfirmacionFaltantes(null);
+    setCargando(true);
+    setSubmitError(null);
+
+    const categoriaElegida = categoriaFija?.id ?? categoriaId;
+    const formData = new FormData(formRef.current);
+    formData.append("categoryIds", categoriaElegida);
+    if (foto) {
+      formData.set("foto", foto);
+    }
+    for (const doc of DOCUMENTOS_INSCRIPCION) {
+      const archivo = documentos[doc.clave];
+      if (archivo) {
+        formData.set(`doc_${doc.clave}`, archivo);
+      }
+    }
+
+    const result = await inscribirJugador(clubId, formData);
+    setCargando(false);
+
+    if (!result.ok) {
+      setSubmitError(result.error ?? "Ocurrió un error inesperado.");
+      return;
+    }
+
+    // Éxito: limpiar, cerrar el panel y refrescar la tabla de fondo
+    tomarFoto(null);
+    setCategoriaId(categoriaFija?.id ?? "");
+    setDocumentos({});
+    formRef.current.reset();
+    onCerrar();
+    router.refresh();
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -87,35 +132,15 @@ export function PanelInscribirJugador({
       setSubmitError("Falta la foto del jugador (obligatoria para inscribirlo).");
       return;
     }
-    for (const doc of DOCUMENTOS_INSCRIPCION) {
-      if (!documentos[doc.clave]) {
-        setSubmitError(`Falta el documento obligatorio: ${doc.nombre}.`);
-        return;
-      }
-    }
 
-    setCargando(true);
-    const formData = new FormData(e.currentTarget);
-    formData.append("categoryIds", categoriaElegida);
-    formData.set("foto", foto);
-    for (const doc of DOCUMENTOS_INSCRIPCION) {
-      formData.set(`doc_${doc.clave}`, documentos[doc.clave] as File);
-    }
-
-    const result = await inscribirJugador(clubId, formData);
-    setCargando(false);
-
-    if (!result.ok) {
-      setSubmitError(result.error ?? "Ocurrió un error inesperado.");
+    // Comprobar si faltan documentos obligatorios
+    const faltantes = DOCUMENTOS_INSCRIPCION.filter((doc) => !documentos[doc.clave]);
+    if (faltantes.length > 0) {
+      setConfirmacionFaltantes(faltantes.map((doc) => doc.nombre));
       return;
     }
 
-    // Éxito: limpiar, cerrar el panel y refrescar la tabla de fondo
-    tomarFoto(null);
-    setCategoriaId(categoriaFija?.id ?? "");
-    (e.target as HTMLFormElement).reset();
-    onCerrar();
-    router.refresh();
+    await ejecutarInscripcion();
   }
 
   const inputClass =
@@ -165,6 +190,7 @@ export function PanelInscribirJugador({
 
         {/* Contenido con scroll */}
         <form
+          ref={formRef}
           onSubmit={handleSubmit}
           className="flex-1 overflow-y-auto p-6 flex flex-col gap-6"
         >
@@ -384,6 +410,66 @@ export function PanelInscribirJugador({
           </div>
         </form>
       </aside>
+
+      {/* Modal de confirmación: documentación faltante */}
+      {confirmacionFaltantes && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-[#1A2A44]/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-100 text-[#F97316] flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <h4 className="font-serif text-base font-bold text-[#1A2A44]">
+                  Documentación pendiente
+                </h4>
+                <p className="text-xs text-slate-600 mt-1">
+                  ¿Desea inscribir al jugador con documentación faltante de:
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-orange-50/70 border border-orange-200/80 rounded-xl p-3.5 flex flex-col gap-2">
+              <ul className="text-xs font-bold text-slate-800 space-y-1">
+                {confirmacionFaltantes.map((nombreDoc) => (
+                  <li key={nombreDoc} className="flex items-center gap-2 text-orange-950">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#F97316] shrink-0" />
+                    <span>{nombreDoc}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-slate-500 mt-1 border-t border-orange-200/60 pt-2">
+                Al confirmar, el jugador quedará registrado y su ficha pasará a ser <b>revisada por la federación</b> hasta completar la documentación.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                disabled={cargando}
+                onClick={() => setConfirmacionFaltantes(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition"
+              >
+                Volver al jugador
+              </button>
+              <button
+                type="button"
+                disabled={cargando}
+                onClick={ejecutarInscripcion}
+                className="px-5 py-2.5 rounded-xl bg-[#F97316] hover:bg-[#F97316]/90 text-white text-xs font-bold transition flex items-center gap-2 shadow-md shadow-[#F97316]/20"
+              >
+                {cargando ? (
+                  <>
+                    <LoaderCircle className="w-4 h-4 animate-spin" /> Inscribiendo...
+                  </>
+                ) : (
+                  "Sí, confirmar"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

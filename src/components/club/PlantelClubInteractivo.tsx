@@ -14,7 +14,12 @@ import {
 } from "lucide-react";
 import { PanelInscribirJugador } from "@/components/admin/PanelInscribirJugador";
 import { FichaJugadorClub } from "@/components/club/FichaJugadorClub";
-import { calcularEdad, calcularEsMenor } from "@/lib/core/rules/jugadoresRules";
+import {
+  calcularEdad,
+  calcularEsMenor,
+  estadoJugadorInfo,
+  type EstadoJugador,
+} from "@/lib/core/rules/jugadoresRules";
 import { crearPlantel, eliminarPlantel } from "@/lib/actions/equipos.actions";
 
 /**
@@ -36,10 +41,11 @@ export interface JugadorFila {
   id: string;
   dni: string;
   fullName: string;
-  status: "activo" | "inactivo";
+  status: EstadoJugador;
   fechaNacimiento: string | null;
   fotoUrl: string | null;
   documentosCargados: string[]; // claves presentes en players.documents
+  documents?: Record<string, string>;
 }
 
 export interface PlantelUI {
@@ -217,6 +223,7 @@ export function PlantelClubInteractivo({
                     const edad = j.fechaNacimiento ? calcularEdad(j.fechaNacimiento) : null;
                     const esMenor = calcularEsMenor(j.fechaNacimiento);
                     const abierta = fichaAbiertaId === j.id;
+                    const infoEstado = estadoJugadorInfo(j.status);
                     return (
                       <Fragment key={j.id}>
                         <tr className="border-b border-slate-100 hover:bg-slate-50/60">
@@ -256,13 +263,10 @@ export function PlantelClubInteractivo({
                           </td>
                           <td className="py-2.5 px-2 text-center">
                             <span
-                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                                j.status === "activo"
-                                  ? "text-green-700 bg-green-100"
-                                  : "text-red-600 bg-red-100"
-                              }`}
+                              title={infoEstado.descripcion}
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-md border inline-block ${infoEstado.badgeClase}`}
                             >
-                              {j.status === "activo" ? "Activo" : "Inactivo"}
+                              {infoEstado.label}
                             </span>
                           </td>
                           <td className="py-2.5 px-2 text-center">
@@ -286,7 +290,7 @@ export function PlantelClubInteractivo({
                         {abierta && (
                           <tr className="border-b border-slate-100 bg-slate-50/50">
                             <td colSpan={6} className="px-4 py-4">
-                              <FichaJugadorClub jugador={j} />
+                              <FichaJugadorClub jugador={j} clubId={clubId} />
                             </td>
                           </tr>
                         )}
