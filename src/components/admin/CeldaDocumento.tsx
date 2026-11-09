@@ -2,19 +2,24 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle, AlertCircle, LoaderCircle } from "lucide-react";
-import { subirDocumento, obtenerUrlDocumento } from "@/lib/actions/documentos.actions";
+import { CheckCircle2, AlertCircle, LoaderCircle, Upload } from "lucide-react";
+import {
+  subirDocumento,
+  obtenerUrlDocumento,
+  type TipoDocumento,
+} from "@/lib/actions/documentos.actions";
 
 /**
  * CELDA DE DOCUMENTO DEL PLANTEL
- * - Rojo (sin documento): clic → abre el selector de archivos y sube.
- * - Verde (con documento): clic → abre el documento en una pestaña nueva.
+ * - Sin documento: clic → abre el selector de archivos y sube.
+ * - Con documento: clic en el check verde → abre el documento firmado en nueva pestaña;
+ *   clic secundario en el ícono de subir → permite reemplazarlo.
  */
 
 interface Props {
   clubId: string;
   playerId: string;
-  tipo: "medical" | "ddjj" | "photo";
+  tipo: TipoDocumento;
   ruta: string | null;
   titulo: string;
 }
@@ -67,32 +72,44 @@ export function CeldaDocumento({ clubId, playerId, tipo, ruta, titulo }: Props) 
   return (
     <span className="inline-flex flex-col items-center gap-1">
       {ruta ? (
-        <button
-          type="button"
-          onClick={handleVer}
-          title={`Ver ${titulo}`}
-          className="hover:scale-110 transition-transform"
-        >
-          <CheckCircle className="w-5 h-5 text-green-600" />
-        </button>
+        <span className="inline-flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleVer}
+            title={`Ver ${titulo}`}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition text-[10px] font-bold"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span>Ver</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            title={`Reemplazar ${titulo}`}
+            className="p-1 rounded-lg text-slate-400 hover:text-[#1A2A44] hover:bg-slate-100 transition"
+          >
+            <Upload className="w-3 h-3" />
+          </button>
+        </span>
       ) : (
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          title={`Subir ${titulo} (PDF/JPG/PNG, máx 5MB)`}
-          className="hover:scale-110 transition-transform"
+          title={`Subir ${titulo} (PDF/JPG/PNG/WebP, máx 5MB)`}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition text-[10px] font-bold"
         >
-          <AlertCircle className="w-5 h-5 text-red-500" />
+          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+          <span>Subir</span>
         </button>
       )}
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.webp"
         onChange={handleArchivo}
         className="hidden"
       />
-      {error && <span className="text-[9px] text-red-500 font-bold">{error}</span>}
+      {error && <span className="text-[9px] text-red-500 font-bold max-w-[120px] leading-tight">{error}</span>}
     </span>
   );
 }

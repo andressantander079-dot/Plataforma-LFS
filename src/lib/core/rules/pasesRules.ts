@@ -6,6 +6,7 @@
  */
 
 import { z } from "zod";
+import type { EstadoJugador } from "./jugadoresRules";
 
 // ============================================================================
 // 1. CONTRATO ESTANDARIZADO DE RESPUESTA DE SERVER ACTIONS
@@ -17,6 +18,13 @@ export type ActionResponse<T = unknown> = {
   error?: string;
   code?: string;
 };
+
+/**
+ * Estados de un jugador (players.status, CHECK en la base):
+ * 'pendiente' | 'activo' | 'en_deuda' | 'denegado' | 'inactivo'.
+ * Alias de EstadoJugador (jugadoresRules.ts) para mantener UNA sola fuente de verdad.
+ */
+export type PlayerStatus = EstadoJugador;
 
 // ============================================================================
 // 2. ESQUEMAS ZOD DE VALIDACIÓN
@@ -31,8 +39,14 @@ export const InscripcionJugadorInputSchema = z.object({
     .regex(/^\d{6,10}$/, "El DNI debe contener entre 6 y 10 dígitos numéricos sin puntos ni letras."),
   first_name: z.string().trim().min(2, "El nombre debe tener al menos 2 caracteres."),
   last_name: z.string().trim().min(2, "El apellido debe tener al menos 2 caracteres."),
-  fecha_nacimiento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha inválido (YYYY-MM-DD)."),
-  foto_path: z.string().min(1, "La foto de perfil es obligatoria."),
+  fecha_nacimiento: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha inválido (YYYY-MM-DD).")
+    .refine(
+      (val) => new Date(`${val}T00:00:00`) <= new Date(),
+      "La fecha de nacimiento no puede ser futura."
+    ),
+  foto_path: z.string().trim().min(1, "La foto de perfil es obligatoria."),
   category_ids: z.array(z.string().uuid()).min(1, "Debe seleccionar al menos una categoría."),
 });
 
@@ -97,6 +111,61 @@ export const TransferWindowInputSchema = z
   });
 
 export type TransferWindowInput = z.infer<typeof TransferWindowInputSchema>;
+
+/** Id de cualquier fila (uuid): se usa para validar los borrados antes de tocar la base. */
+export const IdSchema = z.string().uuid("El identificador no es válido.");
+
+/**
+ * Derecho de pase con la nomenclatura del contrato (tipo_pase / tournament_id).
+ * Convive con TransferFeeInputSchema: usá feePaseADb() para traducirlo a las
+ * columnas reales de transfer_fees (tipo / competition_id).
+ */
+export const FeePaseSchema = z.object({
+  id: z.string().uuid().optional(),
+  category_id: z.string().uuid("Seleccione una categoría válida."),
+  tipo_pase: z.enum(["definitivo", "prestamo"] as const),
+  monto: z.number().min(0, "El monto no puede ser negativo."),
+  tournament_id: z.string().uuid().nullable().optional(),
+});
+
+export type FeePaseInput = z.infer<typeof FeePaseSchema>;
+
+export function feePaseADb(input: FeePaseInput): TransferFeeInput {
+  return {
+    category_id: input.category_id,
+    tipo: input.tipo_pase,
+    competition_id: input.tournament_id ?? null,
+    monto: input.monto,
+  };
+}
+
+/**
+ * Ventana de mercado con la nomenclatura del contrato (fecha_inicio / fecha_fin / activa).
+ * transfer_windows NO tiene columna "activa": el estado sale solo de las fechas, así que
+ * ventanaADb() la descarta. Convive con TransferWindowInputSchema.
+ */
+export const VentanaMercadoSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    nombre: z.string().trim().min(3, "El nombre de la ventana debe tener al menos 3 caracteres."),
+    fecha_inicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de inicio inválida."),
+    fecha_fin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de fin inválida."),
+    activa: z.boolean(),
+  })
+  .refine((data) => data.fecha_inicio <= data.fecha_fin, {
+    message: "La fecha de fin no puede ser anterior a la de inicio.",
+    path: ["fecha_fin"],
+  });
+
+export type VentanaMercadoInput = z.infer<typeof VentanaMercadoSchema>;
+
+export function ventanaADb(input: VentanaMercadoInput): TransferWindowInput {
+  return {
+    nombre: input.nombre,
+    fecha_desde: input.fecha_inicio,
+    fecha_hasta: input.fecha_fin,
+  };
+}
 
 // ============================================================================
 // 3. VALIDACIÓN DE ELEGIBILIDAD DE CATEGORÍAS (JUGAR PARA ARRIBA)

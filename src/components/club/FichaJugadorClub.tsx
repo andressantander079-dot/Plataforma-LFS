@@ -2,9 +2,25 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, AlertCircle, Camera, Cake, Save, FileText, CheckCircle2, XCircle } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  Camera,
+  Cake,
+  Save,
+  FileText,
+  CheckCircle2,
+  XCircle,
+  Upload,
+  ExternalLink,
+} from "lucide-react";
 import { subirFotoJugador, guardarNacimientoJugador } from "@/lib/actions/pases.actions";
-import { DOCUMENTOS_INSCRIPCION } from "@/lib/core/rules/jugadoresRules";
+import {
+  subirDocumento,
+  obtenerUrlDocumento,
+  type TipoDocumento,
+} from "@/lib/actions/documentos.actions";
+import { DOCUMENTOS_INSCRIPCION, estadoJugadorInfo } from "@/lib/core/rules/jugadoresRules";
 import type { JugadorFila } from "./PlantelClubInteractivo";
 
 /**
@@ -13,12 +29,20 @@ import type { JugadorFila } from "./PlantelClubInteractivo";
  *  · Foto (se ve en la planilla, en los pases y en la web pública)
  *  · Fecha de nacimiento (define su categoría y si es menor de edad)
  *  · Documentación de inscripción: DNI, CEMAD médico, CEMAD de autorización
- *    y comprobante de pago de federación (checklist)
+ *    y comprobante de pago de federación (permite adjuntar los faltantes o ver los cargados)
  */
-export function FichaJugadorClub({ jugador }: { jugador: JugadorFila }) {
+export function FichaJugadorClub({
+  jugador,
+  clubId,
+}: {
+  jugador: JugadorFila;
+  clubId?: string;
+}) {
   const router = useRouter();
   const inputFotoRef = useRef<HTMLInputElement>(null);
+  const inputsDocRef = useRef<Record<string, HTMLInputElement | null>>({});
   const [fecha, setFecha] = useState(jugador.fechaNacimiento ?? "");
+  const [docSubiendo, setDocSubiendo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pendiente, startTransition] = useTransition();
@@ -52,7 +76,40 @@ export function FichaJugadorClub({ jugador }: { jugador: JugadorFila }) {
     });
   }
 
+  async function handleSubirDoc(clave: TipoDocumento, archivo: File | null) {
+    if (!archivo || !clubId) return;
+    setError(null);
+    setOk(null);
+    setDocSubiendo(clave);
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    const res = await subirDocumento(clubId, jugador.id, clave, fd);
+    setDocSubiendo(null);
+    if (!res.ok) {
+      setError(res.error ?? "No se pudo subir el documento.");
+    } else {
+      setOk("✅ Documento subido correctamente.");
+      router.refresh();
+    }
+  }
+
+  async function handleVerDoc(clave: string) {
+    const ruta = jugador.documents?.[clave];
+    if (!ruta) return;
+    setError(null);
+    setDocSubiendo(clave);
+    const res = await obtenerUrlDocumento(ruta);
+    setDocSubiendo(null);
+    if (res.ok && res.url) {
+      window.open(res.url, "_blank");
+    } else {
+      setError(res.error ?? "No se pudo abrir el documento.");
+    }
+  }
+
   const cargados = new Set(jugador.documentosCargados ?? []);
+  const cantRequeridos = DOCUMENTOS_INSCRIPCION.filter((d) => cargados.has(d.clave)).length;
+  const infoEstado = estadoJugadorInfo(jugador.status);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -131,45 +188,98 @@ export function FichaJugadorClub({ jugador }: { jugador: JugadorFila }) {
 
       {/* Checklist de documentación de inscripción */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-3 sm:col-span-2">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
             <FileText className="w-3.5 h-3.5" /> Documentación de inscripción
           </p>
-          {cargados.size < 4 ? (
-            <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-              En revisión ({cargados.size}/4 docs)
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${infoEstado.badgeClase}`}>
+              Estado LFS: {infoEstado.label}
             </span>
-          ) : (
-            <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-              Documentación completa (4/4)
-            </span>
-          )}
+            {cantRequeridos < 4 ? (
+              <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                Faltan documentos ({cantRequeridos}/4 docs)
+              </span>
+            ) : (
+              <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                Documentación completa (4/4)
+              </span>
+            )}
+          </div>
         </div>
         <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {DOCUMENTOS_INSCRIPCION.map((doc) => {
             const cargado = cargados.has(doc.clave);
+            const subiendoEste = docSubiendo === doc.clave;
             return (
               <li
                 key={doc.clave}
-                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
                   cargado
                     ? "border-green-200 bg-green-50 text-green-800"
                     : "border-amber-200 bg-amber-50 text-amber-800"
                 }`}
               >
-                {cargado ? (
-                  <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-                ) : (
-                  <XCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <div className="flex items-center gap-2 min-w-0">
+                  {cargado ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  )}
+                  <span className="truncate">{doc.nombre}</span>
+                </div>
+
+                {clubId && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input
+                      ref={(el) => {
+                        inputsDocRef.current[doc.clave] = el;
+                      }}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        e.target.value = "";
+                        handleSubirDoc(doc.clave, f);
+                      }}
+                    />
+                    {subiendoEste ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-[#F97316]" />
+                    ) : (
+                      <>
+                        {cargado && jugador.documents?.[doc.clave] && (
+                          <button
+                            type="button"
+                            onClick={() => handleVerDoc(doc.clave)}
+                            className="px-2 py-1 rounded bg-white border border-green-300 text-green-800 hover:bg-green-100 text-[10px] font-bold flex items-center gap-1 transition"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Ver
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => inputsDocRef.current[doc.clave]?.click()}
+                          className={`px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 transition ${
+                            cargado
+                              ? "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
+                              : "bg-[#F97316] text-white hover:bg-[#F97316]/90"
+                          }`}
+                        >
+                          <Upload className="w-3 h-3" />
+                          {cargado ? "Cambiar" : "Subir"}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
-                {doc.nombre}
               </li>
             );
           })}
         </ul>
         <p className="text-[10px] text-slate-400">
-          Los 4 documentos se exigen al inscribir al jugador. Si falta alguno, hablá con la liga
-          para regularizar su situación.
+          {infoEstado.descripcion} Si falta algún documento, podés adjuntarlo desde acá para que la
+          federación lo revise en Trámites.
         </p>
       </div>
 

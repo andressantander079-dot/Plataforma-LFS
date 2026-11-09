@@ -8,6 +8,7 @@ import {
   fechaRetornoValida,
   type TipoPase,
   type ActionResponse,
+  IdSchema,
   PaseSettingsSchema,
   RangoCategoriaSchema,
   TransferFeeInputSchema,
@@ -1200,15 +1201,17 @@ export async function guardarFeePase(formData: FormData): Promise<ActionResponse
   if (!parseResult.success) {
     return { success: false, error: parseResult.error.issues[0]?.message ?? "Datos de arancel inválidos." };
   }
+  const { category_id, tipo: tipoFee, competition_id, monto: montoFee } = parseResult.data;
+  const competitionIdFee = competition_id ?? null;
 
   // Upsert manual: actualizar la regla existente o crear una nueva
   let consulta = supabase
     .from("transfer_fees")
-    .update({ monto })
-    .eq("category_id", categoryId)
-    .eq("tipo", tipo);
-  consulta = competitionId
-    ? consulta.eq("competition_id", competitionId)
+    .update({ monto: montoFee })
+    .eq("category_id", category_id)
+    .eq("tipo", tipoFee);
+  consulta = competitionIdFee
+    ? consulta.eq("competition_id", competitionIdFee)
     : consulta.is("competition_id", null);
   const { data: actualizadas, error: errorUpdate } = await consulta.select("id");
 
@@ -1216,10 +1219,10 @@ export async function guardarFeePase(formData: FormData): Promise<ActionResponse
 
   if (!actualizadas || actualizadas.length === 0) {
     const { error } = await supabase.from("transfer_fees").insert({
-      category_id: categoryId,
-      competition_id: competitionId,
-      tipo,
-      monto,
+      category_id,
+      competition_id: competitionIdFee,
+      tipo: tipoFee,
+      monto: montoFee,
     });
     if (error) return { success: false, error: "Ya existe una regla para esa combinación de categoría, tipo y torneo." };
   }
@@ -1231,7 +1234,10 @@ export async function guardarFeePase(formData: FormData): Promise<ActionResponse
 export async function eliminarFeePase(feeId: string): Promise<ActionResponse> {
   const { supabase } = await requireAdminPases();
 
-  const { error } = await supabase.from("transfer_fees").delete().eq("id", feeId);
+  const idValido = IdSchema.safeParse(feeId);
+  if (!idValido.success) return { success: false, error: "La regla indicada no es válida." };
+
+  const { error } = await supabase.from("transfer_fees").delete().eq("id", idValido.data);
   if (error) return { success: false, error: "No se pudo eliminar la regla." };
   revalidarPases();
   return { success: true };
@@ -1478,9 +1484,9 @@ export async function crearVentana(formData: FormData): Promise<ActionResponse> 
   }
 
   const { error } = await supabase.from("transfer_windows").insert({
-    nombre,
-    fecha_desde: desde,
-    fecha_hasta: hasta,
+    nombre: parseResult.data.nombre,
+    fecha_desde: parseResult.data.fecha_desde,
+    fecha_hasta: parseResult.data.fecha_hasta,
     creado_por: user.id,
   });
 
@@ -1492,59 +1498,84 @@ export async function crearVentana(formData: FormData): Promise<ActionResponse> 
 export async function eliminarVentana(ventanaId: string): Promise<ActionResponse> {
   const { supabase } = await requireAdminPases();
 
+  const idValido = IdSchema.safeParse(ventanaId);
+  if (!idValido.success) return { success: false, error: "La ventana indicada no es válida." };
+
   const { error } = await supabase
     .from("transfer_windows")
     .delete()
-    .eq("id", ventanaId);
+    .eq("id", idValido.data);
 
   if (error) return { success: false, error: "No se pudo eliminar la ventana." };
   revalidarPases();
   return { success: true };
 }
 
-/** Pre-chequeo asíncrono de DNI con detección de club actual */
-export async function buscarJugadorDniAction(dni: string): Promise<ActionResponse<{
+/**
+ * Pre-chequeo de DNI para el debounce de la UI (~300 ms).
+ * Usa la RPC buscar_jugador_pase (SECURITY DEFINER): el club no puede leer
+ * planteles ajenos con un select directo, la función devuelve solo datos mínimos
+ * (id, nombre, apellido, dni, club actual). No trae fecha de nacimiento ni foto.
+ */
+export async function buscarJugadorPorDniAction(dni: string): Promise<ActionResponse<{
   encontrado: boolean;
-  player?: { id: string; first_name: string; last_name: string; dni: string; fecha_nacimiento?: string | null; foto_path?: string | null };
+  player?: { id: string; first_name: string; last_name: string; dni: string };
   clubActual?: { id: string; name: string } | null;
   perteneceAlMismoClub: boolean;
 }>> {
-  const { supabase, clubId } = await requireClubPases();
-  const dniLimpio = dni.trim();
-  if (!dniLimpio || !/^\d{6,10}$/.test(dniLimpio)) {
+  let ctx: Awaited<ReturnType<typeof requireClubPases>>;
+  try {
+    ctx = await requireClubPases();
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "No autorizado." };
+  }
+  const { supabase, clubId } = ctx;
+
+  const dniLimpio = String(dni ?? "").trim();
+  if (!/^\d{6,10}$/.test(dniLimpio)) {
     return { success: false, error: "El DNI debe tener entre 6 y 10 dígitos numéricos." };
   }
 
-  const { data: player } = await supabase
-    .from("players")
-    .select("id, first_name, last_name, dni, fecha_nacimiento, foto_path")
-    .eq("dni", dniLimpio)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc("buscar_jugador_pase", { p_dni: dniLimpio });
+  if (error) return { success: false, error: "No se pudo buscar el jugador." };
 
-  if (!player) {
-    return {
-      success: true,
-      data: { encontrado: false, perteneceAlMismoClub: false },
-    };
+  const fila = (Array.isArray(data) ? data[0] : data) as
+    | {
+        player_id: string;
+        nombre: string;
+        apellido: string;
+        dni: string;
+        club_actual: string | null;
+        club_actual_id: string | null;
+      }
+    | null
+    | undefined;
+
+  if (!fila) {
+    return { success: true, data: { encontrado: false, perteneceAlMismoClub: false } };
   }
 
-  const { data: catRows } = await supabase
-    .from("player_categories")
-    .select("club_id, clubs(id, name)")
-    .eq("player_id", player.id)
-    .limit(1)
-    .maybeSingle();
-
-  const clubActual = (catRows?.clubs as unknown as { id: string; name: string } | null) ?? null;
-  const perteneceAlMismoClub = Boolean(clubActual && clubId && clubActual.id === clubId);
+  const clubActual = fila.club_actual_id
+    ? { id: fila.club_actual_id, name: fila.club_actual ?? "" }
+    : null;
 
   return {
     success: true,
     data: {
       encontrado: true,
-      player,
+      player: {
+        id: fila.player_id,
+        first_name: fila.nombre,
+        last_name: fila.apellido,
+        dni: fila.dni,
+      },
       clubActual,
-      perteneceAlMismoClub,
+      perteneceAlMismoClub: Boolean(clubActual && clubId && clubActual.id === clubId),
     },
   };
+}
+
+/** Compatibilidad: nombre anterior de buscarJugadorPorDniAction. */
+export async function buscarJugadorDniAction(dni: string) {
+  return buscarJugadorPorDniAction(dni);
 }
