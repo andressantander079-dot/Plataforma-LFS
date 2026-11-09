@@ -18,10 +18,19 @@ const MIME_PERMITIDOS: Record<string, string> = {
   "application/pdf": "pdf",
   "image/jpeg": "jpg",
   "image/png": "png",
+  "image/webp": "webp",
 };
 
-const TIPOS_VALIDOS = ["medical", "ddjj", "photo"] as const;
-type TipoDocumento = (typeof TIPOS_VALIDOS)[number];
+const TIPOS_VALIDOS = [
+  "dni",
+  "cemad_medico",
+  "cemad_autorizacion",
+  "comprobante_federacion",
+  "medical",
+  "ddjj",
+  "photo",
+] as const;
+export type TipoDocumento = (typeof TIPOS_VALIDOS)[number];
 
 type ActionResult = { ok: boolean; error?: string; url?: string };
 
@@ -144,6 +153,7 @@ export async function subirDocumento(
 
   revalidatePath(`/admin/equipos/${clubId}/plantel`);
   revalidatePath(`/club/planteles`);
+  revalidatePath(`/admin/tramites`);
   return { ok: true };
 }
 

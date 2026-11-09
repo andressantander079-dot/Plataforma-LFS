@@ -9,6 +9,12 @@ import {
   DOCUMENTOS_INSCRIPCION,
   type CategoriaConRango,
 } from "@/lib/core/rules/jugadoresRules";
+import {
+  InscripcionJugadorInputSchema,
+  type ActionResponse,
+  type InscripcionJugadorInput,
+  type PlayerStatus,
+} from "@/lib/core/rules/pasesRules";
 
 /**
  * ACCIONES DEL MÓDULO EQUIPOS (Pasos 2 y 4)
@@ -515,6 +521,108 @@ export async function inscribirJugador(
   revalidatePath(`/club/planteles`);
   revalidatePath(`/admin/tramites`);
   return { ok: true };
+}
+
+
+// ---------- INSCRIPCIÓN DEL CLUB VÍA RPC (Fase 2) ----------
+// Camino exclusivo del panel del club: la base valida todo (sesión, DNI, edad,
+// categorías) dentro de la función inscribir_jugador_club y deja al jugador en
+// estado 'pendiente' para que lo dictamine la federación. La foto se sube ANTES
+// de llamar a la función, por eso cualquier fallo borra la foto del bucket
+// (sin esto quedarían archivos huérfanos). Se usa el cliente autenticado normal:
+// nunca service-role.
+
+interface InscribirJugadorRpcResult {
+  success: boolean;
+  player_id?: string;
+  status?: "pendiente";
+  message?: string;
+  error?: string;
+  code?: "REQUIRES_TRANSFER";
+  existing_club_id?: string;
+  existing_club_name?: string;
+}
+
+export async function inscribirJugadorClubAction(
+  input: InscripcionJugadorInput
+): Promise<
+  ActionResponse<{
+    playerId?: string;
+    status?: PlayerStatus;
+    existingClubName?: string;
+    existingClubId?: string;
+  }>
+> {
+  const supabase = await createLfsServerClient();
+
+  // Borra la foto ya subida si la inscripción no prosperó (nunca rompe la respuesta)
+  async function rollbackPhoto(path?: string) {
+    if (!path || !path.trim()) return;
+    try {
+      await supabase.storage.from("fotos-jugadores").remove([path]);
+    } catch {
+      // silencioso: no hay nada más que hacer si el borrado falla
+    }
+  }
+
+  const parsed = InscripcionJugadorInputSchema.safeParse(input);
+  if (!parsed.success) {
+    await rollbackPhoto(input?.foto_path);
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Los datos del jugador no son válidos.",
+    };
+  }
+  const datos = parsed.data;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    await rollbackPhoto(datos.foto_path);
+    return { success: false, error: "No hay sesión activa. Iniciá sesión nuevamente." };
+  }
+
+  const playerId = datos.player_id ?? crypto.randomUUID();
+
+  let rpcData: InscribirJugadorRpcResult | null = null;
+  let rpcFailed = false;
+  try {
+    const res = await supabase.rpc("inscribir_jugador_club", {
+      p_player_id: playerId,
+      p_dni: datos.dni,
+      p_first_name: datos.first_name,
+      p_last_name: datos.last_name,
+      p_fecha_nacimiento: datos.fecha_nacimiento,
+      p_foto_path: datos.foto_path,
+      p_category_ids: datos.category_ids,
+    });
+    rpcFailed = Boolean(res.error);
+    rpcData = (res.data as InscribirJugadorRpcResult | null) ?? null;
+  } catch {
+    rpcFailed = true;
+  }
+
+  // Error de red / SQL, o la función respondió success:false → deshacer la foto
+  if (rpcFailed || !rpcData || rpcData.success !== true) {
+    await rollbackPhoto(datos.foto_path);
+    if (rpcFailed || !rpcData) {
+      return { success: false, error: "No se pudo inscribir al jugador. Probá de nuevo." };
+    }
+    return {
+      success: false,
+      error: rpcData.error ?? "No se pudo inscribir al jugador.",
+      code: rpcData.code,
+      data: {
+        existingClubName: rpcData.existing_club_name,
+        existingClubId: rpcData.existing_club_id,
+      },
+    };
+  }
+
+  revalidatePath("/club/planteles");
+  revalidatePath("/club/dashboard");
+  return { success: true, data: { playerId: rpcData.player_id, status: "pendiente" } };
 }
 
 

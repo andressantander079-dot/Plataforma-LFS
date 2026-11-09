@@ -94,6 +94,60 @@ export function contarDocumentosRequeridos(
   return DOCUMENTOS_INSCRIPCION.filter((d) => docs[d.clave]).length;
 }
 
+/**
+ * Tipos de documento que se pueden subir a la ficha de un jugador: los 4 de la
+ * federación (Paso 10B) más los 3 del Paso 3, que se conservan para no perder
+ * archivos de jugadores cargados antes.
+ */
+export type TipoDocumentoPlantel = ClaveDocumentoInscripcion | "medical" | "ddjj" | "photo";
+
+/** Resumen del plantel por estado: alimenta los contadores de la pantalla del admin. */
+export interface ResumenPlantel {
+  total: number;
+  pendientes: number;
+  enDeuda: number;
+  activos: number;
+  denegados: number;
+  inactivos: number;
+  /** Pueden ir a planilla: activos + en deuda. */
+  habilitados: number;
+  /** Jugadores vigentes (no inactivos) con menos de los 4 documentos obligatorios. */
+  conDocsIncompletos: number;
+}
+
+export function resumirPlantel(
+  jugadores: {
+    status: EstadoJugador | string | null | undefined;
+    documents: Record<string, string> | null | undefined;
+  }[]
+): ResumenPlantel {
+  const r: ResumenPlantel = {
+    total: jugadores.length,
+    pendientes: 0,
+    enDeuda: 0,
+    activos: 0,
+    denegados: 0,
+    inactivos: 0,
+    habilitados: 0,
+    conDocsIncompletos: 0,
+  };
+
+  for (const j of jugadores) {
+    const estado = estadoJugadorInfo(j.status).clave;
+    if (estado === "pendiente") r.pendientes++;
+    else if (estado === "en_deuda") r.enDeuda++;
+    else if (estado === "denegado") r.denegados++;
+    else if (estado === "inactivo") r.inactivos++;
+    else r.activos++;
+
+    if (puedeJugarEnPlanilla(estado)) r.habilitados++;
+    if (estado !== "inactivo" && contarDocumentosRequeridos(j.documents) < DOCUMENTOS_INSCRIPCION.length) {
+      r.conDocsIncompletos++;
+    }
+  }
+  return r;
+}
+
 /** Nombres de los documentos obligatorios que todavía faltan. */
 export function documentosFaltantes(
   documents: Record<string, string> | null | undefined

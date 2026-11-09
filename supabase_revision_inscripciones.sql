@@ -6,8 +6,10 @@
 -- 2) Estado inicial: los jugadores registrados por clubes arrancan como 'pendiente'.
 -- 3) Campo 'motivo_resolucion' para observaciones de la federación.
 -- 4) Actualización del procedimiento RPC 'inscribir_jugador_club' para que inserte
---    en estado 'pendiente' y espere resolución federativa.
+--    en estado 'pendiente', valide jerarquía y soporte jugar para arriba.
 -- 5) Índices de rendimiento para la bandeja de Trámites (/admin/tramites).
+-- 6) Políticas de Supabase Storage (fotos-jugadores y documentos-jugadores)
+--    con soporte WebP y permiso DELETE para rollback atómico de fotos huérfanas.
 --
 -- Ejecutar en: Supabase Dashboard → SQL Editor → New query → Run
 -- =============================================================================
@@ -237,6 +239,50 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.inscribir_jugador_club TO authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 4. POLÍTICAS DE SUPABASE STORAGE (fotos-jugadores y documentos-jugadores)
+-- -----------------------------------------------------------------------------
+-- Permite formatos PDF, JPG, PNG y WebP en ambos buckets
+UPDATE storage.buckets
+SET allowed_mime_types = ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+WHERE id IN ('documentos-jugadores', 'fotos-jugadores');
+
+-- Política DELETE para fotos-jugadores: permite al club borrar la foto huérfana en rollback
+DROP POLICY IF EXISTS "fotos: admin o su club eliminan" ON storage.objects;
+CREATE POLICY "fotos: admin o su club eliminan"
+  ON storage.objects FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'fotos-jugadores'
+    AND (
+      public.is_admin()
+      OR (storage.foldername(name))[1] = public.mi_club_id()::text
+    )
+  );
+
+-- Política INSERT para documentos-jugadores: permite al admin o al club subir documentos
+DROP POLICY IF EXISTS "documentos: admin o su club suben" ON storage.objects;
+CREATE POLICY "documentos: admin o su club suben"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'documentos-jugadores'
+    AND (
+      public.is_admin()
+      OR (storage.foldername(name))[1] = public.mi_club_id()::text
+    )
+  );
+
+-- Política SELECT para documentos-jugadores: permite al admin o al club leer documentos
+DROP POLICY IF EXISTS "documentos: admin o su club leen" ON storage.objects;
+CREATE POLICY "documentos: admin o su club leen"
+  ON storage.objects FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'documentos-jugadores'
+    AND (
+      public.is_admin()
+      OR (storage.foldername(name))[1] = public.mi_club_id()::text
+    )
+  );
 
 -- =============================================================================
 -- FIN DEL SCRIPT

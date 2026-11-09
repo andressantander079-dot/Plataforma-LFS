@@ -136,11 +136,10 @@ function AdjuntoMensaje({
     <button
       type="button"
       onClick={() => url && window.open(url, "_blank")}
-      className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-        esMio
+      className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition ${esMio
           ? "bg-white/10 text-white hover:bg-white/20"
           : "bg-slate-100 text-[#1A2A44] hover:bg-slate-200"
-      }`}
+        }`}
     >
       <FileText className="w-4 h-4 shrink-0" />
       <span className="truncate max-w-[180px]">{nombre}</span>
@@ -395,9 +394,8 @@ export function VentanaChat({
             setResultados(null);
             setTerminoBusqueda("");
           }}
-          className={`p-2 rounded-xl transition shrink-0 ${
-            buscadorAbierto ? "bg-[#F97316] text-white" : "text-slate-300 hover:text-white hover:bg-white/10"
-          }`}
+          className={`p-2 rounded-xl transition shrink-0 ${buscadorAbierto ? "bg-[#F97316] text-white" : "text-slate-300 hover:text-white hover:bg-white/10"
+            }`}
           aria-label="Buscar en la conversación"
         >
           <Search className="w-4.5 h-4.5 w-[18px] h-[18px]" />
@@ -496,21 +494,19 @@ export function VentanaChat({
 
               <div
                 id={`mensaje-${mensaje.id}`}
-                className={`flex ${esMio ? "justify-end" : "justify-start"} ${
-                  resaltadoId === mensaje.id
+                className={`flex ${esMio ? "justify-end" : "justify-start"} ${resaltadoId === mensaje.id
                     ? "rounded-2xl ring-2 ring-[#F97316] ring-offset-2 ring-offset-[#F4F6FA] transition"
                     : ""
-                }`}
+                  }`}
               >
                 {comunicado ? (
                   <TarjetaComunicado mensaje={mensaje} esMio={esMio} />
                 ) : (
                   <div
-                    className={`max-w-[78%] sm:max-w-[65%] rounded-2xl px-3.5 py-2 shadow-sm flex flex-col gap-1.5 ${
-                      esMio
+                    className={`max-w-[78%] sm:max-w-[65%] rounded-2xl px-3.5 py-2 shadow-sm flex flex-col gap-1.5 ${esMio
                         ? "bg-gradient-to-br from-[#1A2A44] to-[#22334E] text-white rounded-br-md"
                         : "bg-white text-[#1A2A44] border border-slate-200 rounded-bl-md"
-                    }`}
+                      }`}
                   >
                     {mensaje.attachment_path && mensaje.attachment_name && (
                       <AdjuntoMensaje
@@ -532,9 +528,8 @@ export function VentanaChat({
                         </p>
                       ))}
                     <div
-                      className={`flex items-center gap-1 self-end -mb-0.5 ${
-                        esMio ? "text-slate-300" : "text-slate-400"
-                      }`}
+                      className={`flex items-center gap-1 self-end -mb-0.5 ${esMio ? "text-slate-300" : "text-slate-400"
+                        }`}
                     >
                       <span className="text-[10px]">{horaCorta(mensaje.created_at)}</span>
                       {esMio &&

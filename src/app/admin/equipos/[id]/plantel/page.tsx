@@ -11,7 +11,7 @@ import { GestionPlanteles, type PlantelResumen } from "@/components/admin/Gestio
 
 /**
  * PLANTEL DE UN CLUB (server component)
- * Trae club, jugadores (con documentos), categorías y usuarios
+ * Trae club, jugadores (con documentos, foto y fecha de nacimiento), categorías y usuarios
  * con acceso desde Supabase y se los pasa al componente interactivo.
  */
 
@@ -23,6 +23,8 @@ interface PlayerRow {
     first_name: string;
     last_name: string;
     status: EstadoJugador;
+    fecha_nacimiento?: string | null;
+    foto_path?: string | null;
     documents: Record<string, string> | null;
   } | null;
   categories: { id: string; name: string } | null;
@@ -64,7 +66,7 @@ export default async function ClubPlantelAdmin({
   const { data: rows } = await supabase
     .from("player_categories")
     .select(
-      "player_id, players ( id, dni, first_name, last_name, status, documents ), categories ( id, name )"
+      "player_id, players ( id, dni, first_name, last_name, status, fecha_nacimiento, foto_path, documents ), categories ( id, name )"
     )
     .eq("club_id", id);
 
@@ -112,6 +114,8 @@ export default async function ClubPlantelAdmin({
   // Para inscribir solo se ofrecen categorías con plantel creado
   const categoriasConPlantel = todasLasCategorias.filter((c) => idsConPlantel.has(c.id));
 
+  const urlFotos = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/fotos-jugadores/`;
+
   // 5. Agrupar: un jugador puede aparecer en varias filas (una por categoría)
   const mapa = new Map<string, JugadorPlantel>();
   for (const row of (rows ?? []) as unknown as PlayerRow[]) {
@@ -128,6 +132,8 @@ export default async function ClubPlantelAdmin({
         dni: row.players.dni,
         fullName: `${row.players.last_name}, ${row.players.first_name}`,
         status: row.players.status,
+        fechaNacimiento: row.players.fecha_nacimiento ?? null,
+        fotoUrl: row.players.foto_path ? `${urlFotos}${row.players.foto_path}` : null,
         categories: categoria ? [categoria] : [],
         documents: (row.players.documents as Record<string, string>) ?? {},
       });
