@@ -10,10 +10,22 @@ import {
   MessageSquare 
 } from "lucide-react";
 import { obtenerNoticiasPublicas } from "@/lib/actions/noticias.actions";
+import { obtenerSeccionEnVivo } from "@/lib/actions/planilla-en-vivo.actions";
 import { SeccionNoticiasHome } from "@/components/noticias/SeccionNoticiasHome";
+import { SeccionEnVivo, type DatosSeccion } from "@/components/transmision/SeccionEnVivo";
+
+export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const noticias = await obtenerNoticiasPublicas();
+  const [noticias, seccionVivoRes] = await Promise.all([
+    obtenerNoticiasPublicas(),
+    obtenerSeccionEnVivo(),
+  ]);
+  const datosVivo = (seccionVivoRes.data ?? {
+    enVivo: [],
+    proximosHoy: [],
+    ultimosResultados: [],
+  }) as unknown as DatosSeccion;
 
   return (
     <div className="flex-1 flex flex-col">
@@ -78,6 +90,9 @@ export default async function Home() {
 
         {/* Últimas noticias de la liga (Paso 17A) */}
         <SeccionNoticiasHome noticias={noticias} />
+
+        {/* Fútsal en vivo: pelota que pica + partidos de hoy (Paso 17C) */}
+        <SeccionEnVivo datosIniciales={datosVivo} />
 
         {/* Mosaicos de los Tres Paneles Principales */}
         <section>

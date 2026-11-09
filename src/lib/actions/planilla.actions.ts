@@ -70,6 +70,7 @@ export interface PlanillaCompleta {
     confirmadaLocal: string | null;
     confirmadaVisitante: string | null;
     approvedAt: string | null;
+    cuerpoTecnico: Record<string, unknown> | null;
   } | null;
   convocados: Convocado[];
   eventos: EventoPlanilla[];
@@ -252,7 +253,7 @@ export async function obtenerPlanilla(matchId: string): Promise<PlanillaCompleta
 
   const { data: sheet } = await supabase
     .from("match_sheets")
-    .select("id, status, confirmada_local, confirmada_visitante, approved_at")
+    .select("id, status, confirmada_local, confirmada_visitante, approved_at, cuerpo_tecnico")
     .eq("match_id", matchId)
     .maybeSingle();
 
@@ -341,6 +342,7 @@ export async function obtenerPlanilla(matchId: string): Promise<PlanillaCompleta
           confirmadaLocal: sheet.confirmada_local,
           confirmadaVisitante: sheet.confirmada_visitante,
           approvedAt: sheet.approved_at,
+          cuerpoTecnico: (sheet.cuerpo_tecnico ?? null) as Record<string, unknown> | null,
         }
       : null,
     convocados,
