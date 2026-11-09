@@ -9,8 +9,12 @@ import {
   TrendingUp, 
   MessageSquare 
 } from "lucide-react";
+import { obtenerNoticiasPublicas } from "@/lib/actions/noticias.actions";
+import { SeccionNoticiasHome } from "@/components/noticias/SeccionNoticiasHome";
 
-export default function Home() {
+export default async function Home() {
+  const noticias = await obtenerNoticiasPublicas();
+
   return (
     <div className="flex-1 flex flex-col">
       {/* Header Institucional LFS */}
@@ -71,6 +75,9 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {/* Últimas noticias de la liga (Paso 17A) */}
+        <SeccionNoticiasHome noticias={noticias} />
 
         {/* Mosaicos de los Tres Paneles Principales */}
         <section>

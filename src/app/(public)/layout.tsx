@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Trophy, Menu, X, Download, Calendar, BarChart3, ListOrdered, FileText, ArrowLeftRight } from "lucide-react";
+import { Trophy, Menu, X, Download, Calendar, BarChart3, ListOrdered, FileText, ArrowLeftRight, Newspaper } from "lucide-react";
 
 export default function PublicLayout({
   children,
@@ -13,6 +13,7 @@ export default function PublicLayout({
 
   const navigation = [
     { name: "Inicio", href: "/", icon: Trophy },
+    { name: "Noticias", href: "/noticias", icon: Newspaper },
     { name: "Fixture", href: "/fixture", icon: Calendar },
     { name: "Posiciones", href: "/posiciones", icon: ListOrdered },
     { name: "Estadísticas", href: "/estadisticas", icon: BarChart3 },

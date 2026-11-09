@@ -17,9 +17,10 @@ export function PanelTramitesAdmin({
   bandejaInscripciones,
   panelMercado,
 }: Props) {
-  // Si hay inscripciones pendientes, arrancar en Inscripciones
+  // Si hay inscripciones pendientes de revisión, arrancar en Inscripciones;
+  // si no hay nada que dictaminar, arrancar en Pases (la bandeja con movimiento).
   const [seccion, setSeccion] = useState<"inscripciones" | "pases">(
-    bandejaInscripciones.kpis.pendientes > 0 ? "inscripciones" : "inscripciones"
+    bandejaInscripciones.kpis.pendientes > 0 ? "inscripciones" : "pases"
   );
 
   return (
