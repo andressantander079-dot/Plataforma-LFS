@@ -1294,6 +1294,13 @@ export interface DiaCalendarioUI {
     status: string;
   }>;
   eventos: EventoArbitralUI[];
+  /** Eventos generales de la LIGA (Paso 17B): reuniones, congresos, cierres… */
+  liga: Array<{
+    id: string;
+    hora: string | null;
+    titulo: string;
+    ubicacion: string | null;
+  }>;
   bloqueado: string | null; // motivo del bloque, si hay
 }
 
@@ -1304,29 +1311,37 @@ export async function obtenerMiCalendario(mes: string): Promise<DiaCalendarioUI[
   const [anio, m] = mes.split("-").map(Number);
   const hasta = new Date(anio, m, 1).toISOString().slice(0, 10);
 
-  const [{ data: partidos }, { data: eventos }, { data: bloques }] = await Promise.all([
-    supabase
-      .from("matches")
-      .select(
-        "id, scheduled_at, status, home_team_id, away_team_id, competitions(name)"
-      )
-      .eq("referee_id", user.id)
-      .gte("scheduled_at", desde)
-      .lt("scheduled_at", hasta)
-      .order("scheduled_at"),
-    supabase
-      .from("referee_events")
-      .select("id, fecha, hora, titulo, descripcion, obligatorio")
-      .gte("fecha", desde)
-      .lt("fecha", hasta)
-      .order("fecha"),
-    supabase
-      .from("referee_unavailability")
-      .select("desde, hasta, motivo")
-      .eq("referee_id", user.id)
-      .lte("desde", hasta)
-      .gte("hasta", desde),
-  ]);
+  const [{ data: partidos }, { data: eventos }, { data: bloques }, { data: eventosLiga }] =
+    await Promise.all([
+      supabase
+        .from("matches")
+        .select(
+          "id, scheduled_at, status, home_team_id, away_team_id, competitions(name)"
+        )
+        .eq("referee_id", user.id)
+        .gte("scheduled_at", desde)
+        .lt("scheduled_at", hasta)
+        .order("scheduled_at"),
+      supabase
+        .from("referee_events")
+        .select("id, fecha, hora, titulo, descripcion, obligatorio")
+        .gte("fecha", desde)
+        .lt("fecha", hasta)
+        .order("fecha"),
+      supabase
+        .from("referee_unavailability")
+        .select("desde, hasta, motivo")
+        .eq("referee_id", user.id)
+        .lte("desde", hasta)
+        .gte("hasta", desde),
+      // Eventos generales de la liga (Paso 17B): los ve el árbitro en solo lectura
+      supabase
+        .from("league_events")
+        .select("id, fecha, hora, titulo, ubicacion")
+        .gte("fecha", desde)
+        .lt("fecha", hasta)
+        .order("fecha"),
+    ]);
 
   const teamIds = new Set<string>();
   for (const p of partidos ?? []) {
@@ -1341,7 +1356,7 @@ export async function obtenerMiCalendario(mes: string): Promise<DiaCalendarioUI[
 
   const dias = new Map<string, DiaCalendarioUI>();
   const diaDe = (fecha: string): DiaCalendarioUI => {
-    const d = dias.get(fecha) ?? { fecha, partidos: [], eventos: [], bloqueado: null };
+    const d = dias.get(fecha) ?? { fecha, partidos: [], eventos: [], liga: [], bloqueado: null };
     dias.set(fecha, d);
     return d;
   };
@@ -1368,6 +1383,15 @@ export async function obtenerMiCalendario(mes: string): Promise<DiaCalendarioUI[
       titulo: e.titulo,
       descripcion: e.descripcion,
       obligatorio: e.obligatorio,
+    });
+  }
+  // Eventos generales de la liga (reuniones de delegados, congresos, cierres…)
+  for (const e of eventosLiga ?? []) {
+    diaDe(e.fecha).liga.push({
+      id: e.id,
+      hora: typeof e.hora === "string" ? e.hora.slice(0, 5) : null,
+      titulo: e.titulo,
+      ubicacion: e.ubicacion ?? null,
     });
   }
   // Bloques: marcan TODOS los días del rango dentro del mes

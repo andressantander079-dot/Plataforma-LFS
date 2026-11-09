@@ -20,6 +20,7 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
+  CalendarDays,
 } from "lucide-react";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion";
 import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria";
@@ -46,6 +47,7 @@ export function ClubSidebar({ clubName, clubStatus, userName, children }: ClubSi
     { name: "Dashboard", href: "/club/dashboard", icon: LayoutDashboard },
     { name: "Plantel", href: "/club/planteles", icon: Users },
     { name: "Partidos y Torneos", href: "/club/partidos", icon: Trophy },
+    { name: "Agenda", href: "/club/agenda", icon: CalendarDays },
     { name: "Finanzas y Pagos", href: "/club/finanzas", icon: Wallet },
     { name: "Tribunal", href: "/club/tribunal", icon: Scale },
     { name: "Trámites y Pases", href: "/club/tramites", icon: ClipboardList },

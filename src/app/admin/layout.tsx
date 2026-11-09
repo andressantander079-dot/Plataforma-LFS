@@ -15,7 +15,9 @@ import {
   Menu,
   X,
   Newspaper,
-  Download
+  Download,
+  CalendarDays,
+  BarChart3
 } from "lucide-react";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion"
 import { BadgeMensajeria } from "@/components/mensajeria/BadgeMensajeria"
@@ -31,6 +33,7 @@ export default function AdminLayout({
   const menuItems = [
     { name: "Dashboard", href: "/admin/dashboard", icon: Trophy },
     { name: "Competencias", href: "/admin/competencias", icon: Trophy },
+    { name: "Agenda", href: "/admin/agenda", icon: CalendarDays },
     { name: "Equipos (Clubes)", href: "/admin/equipos", icon: Users },
     { name: "Tesorería", href: "/admin/tesoreria", icon: Wallet },
     { name: "Trámites", href: "/admin/tramites", icon: ClipboardList },
@@ -38,6 +41,8 @@ export default function AdminLayout({
     { name: "Tribunal de Disciplina", href: "/admin/tribunal/sanciones", icon: Scale },
     { name: "Noticias", href: "/admin/noticias", icon: Newspaper },
     { name: "Descargas", href: "/admin/descargas", icon: Download },
+    { name: "Reglamento", href: "/admin/reglamento", icon: FileText },
+    { name: "Estadísticas", href: "/admin/estadisticas", icon: BarChart3 },
     { name: "Mensajería", href: "/admin/mensajeria", icon: MessageSquare },
     { name: "Configuración", href: "/admin/configuracion", icon: Settings },
   ];

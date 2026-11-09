@@ -1,10 +1,10 @@
-import { redirect } from "next/navigation";
+import { PaginaNoDisponible } from "@/components/compartidos/PaginaNoDisponible";
 
 /**
- * Catch-all del panel árbitro (Paso 16): antes mostraba submódulos falsos
- * (firma táctil trucha, etc.). Ahora todo es real y tiene su propia ruta,
- * así que cualquier subruta vieja vuelve al panel principal.
+ * Catch-all del árbitro (Paso 17B): antes redirigía en silencio al panel.
+ * Ahora muestra el 404 premium con accesos directos a sus módulos reales
+ * (calendario, planillas, designaciones), más claro y consistente.
  */
 export default function ArbitroCatchAll() {
-  redirect("/arbitro/dashboard");
+  return <PaginaNoDisponible rol="arbitro" />;
 }

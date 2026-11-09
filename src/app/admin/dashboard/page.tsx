@@ -19,6 +19,7 @@ import { QuickActions } from "@/components/dashboards/QuickActions";
 import { FeedActividad, type ItemActividad } from "@/components/dashboards/FeedActividad";
 import { Sparkline } from "@/components/dashboards/Sparkline";
 import { RealtimeRefresher } from "@/components/realtime/RealtimeRefresher";
+import { WidgetProximosEventos } from "@/components/agenda/WidgetProximosEventos";
 
 /**
  * DASHBOARD ADMIN — Centro de comando de la federación (DATOS REALES).
@@ -159,7 +160,7 @@ export default async function AdminDashboard() {
   return (
     <div className="max-w-5xl mx-auto flex flex-col gap-6">
       <RealtimeRefresher
-        tablas={["matches", "transfers", "players", "clubs", "treasury_payments", "audit_logs"]}
+        tablas={["matches", "transfers", "players", "clubs", "treasury_payments", "audit_logs", "league_events"]}
       />
 
       <SaludoInteligente
@@ -226,6 +227,9 @@ export default async function AdminDashboard() {
           Partidos con resultado confirmado por día, últimos 30 días.
         </p>
       </section>
+
+      {/* Próximos 3 eventos de la agenda (Paso 17B) */}
+      <WidgetProximosEventos />
 
       <QuickActions
         acciones={[

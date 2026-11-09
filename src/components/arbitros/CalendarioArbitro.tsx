@@ -5,19 +5,23 @@ import Link from "next/link";
 import {
   AlertTriangle,
   Calendar,
+  CalendarDays,
   CalendarX,
   ChevronLeft,
   ChevronRight,
   GraduationCap,
   Loader2,
+  MapPin,
   Volleyball,
 } from "lucide-react";
 import { obtenerMiCalendario, type DiaCalendarioUI } from "@/lib/actions/arbitros.actions";
 
 /**
- * CALENDARIO DEL ÁRBITRO — mes a mes con TRES cosas reales vinculadas:
- * sus partidos designados, los eventos que carga la liga (capacitaciones,
- * congresos) y sus propios bloques de no disponibilidad.
+ * CALENDARIO DEL ÁRBITRO — mes a mes con CUATRO cosas reales vinculadas:
+ * sus partidos designados, los eventos arbitrales (capacitaciones del
+ * Colegio), los eventos generales de la LIGA (Paso 17B: reuniones de
+ * delegados, congresos, cierres de inscripción) y sus bloques de no
+ * disponibilidad.
  */
 export function CalendarioArbitro({
   mesInicial,
@@ -134,6 +138,25 @@ export function CalendarioArbitro({
                         )}
                       </p>
                       {e.descripcion && <p className="text-slate-500">{e.descripcion}</p>}
+                    </div>
+                  </div>
+                ))}
+                {d.liga.map((e) => (
+                  <div key={`liga-${e.id}`} className="flex items-start gap-2 text-xs">
+                    <CalendarDays className="w-3.5 h-3.5 text-violet-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-[#1A2A44] flex items-center gap-1.5 flex-wrap">
+                        {e.hora ? `${e.hora} · ` : ""}
+                        {e.titulo}
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 border border-violet-200">
+                          LIGA
+                        </span>
+                      </p>
+                      {e.ubicacion && (
+                        <p className="text-slate-500 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" /> {e.ubicacion}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}
