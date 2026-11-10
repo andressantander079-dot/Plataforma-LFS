@@ -85,6 +85,9 @@ function revalidarPases() {
   revalidatePath("/admin/tramites");
   revalidatePath("/club/tramites");
   revalidatePath("/club/dashboard");
+  revalidatePath("/club/planteles");
+  revalidatePath("/admin/equipos");
+  revalidatePath("/admin/planteles");
   revalidatePath("/transferencias");
 }
 
@@ -571,14 +574,20 @@ export async function completarPase(transferId: string) {
     };
   }
 
-  // 2) Mover al jugador de club (todas sus categorías)
-  if (pase.from_club_id && pase.to_club_id) {
-    const { error: errorMov } = await supabase
+  // 2) Mover al jugador de club (todas sus categorías) usando cliente admin para garantizar bypass de RLS
+  if (pase.to_club_id) {
+    const admin = createLfsAdminClient();
+    const { error: errorMov } = await admin
       .from("player_categories")
       .update({ club_id: pase.to_club_id })
-      .eq("player_id", pase.player_id)
-      .eq("club_id", pase.from_club_id);
+      .eq("player_id", pase.player_id);
     if (errorMov) return { error: "No se pudo mover al jugador al club nuevo." };
+
+    // Al completarse el pase, el jugador pasa a estar activo en su nuevo club
+    await admin
+      .from("players")
+      .update({ status: "activo" })
+      .eq("id", pase.player_id);
   }
 
   // 3) Número de comprobante + estado final
@@ -1036,12 +1045,12 @@ export async function rescindirPrestamo(transferId: string) {
   const recargo = calcularRecargoRescision(modoRecargo, valorRecargo, tarifaPrestamo);
 
   // El jugador vuelve al club de origen
-  if (pase.from_club_id && pase.to_club_id) {
-    const { error: errorMov } = await supabase
+  if (pase.from_club_id) {
+    const admin = createLfsAdminClient();
+    const { error: errorMov } = await admin
       .from("player_categories")
       .update({ club_id: pase.from_club_id })
-      .eq("player_id", pase.player_id)
-      .eq("club_id", pase.to_club_id);
+      .eq("player_id", pase.player_id);
     if (errorMov) return { error: "No se pudo devolver al jugador al club de origen." };
   }
 
@@ -1303,6 +1312,21 @@ export async function cargarPaseHistorico(formData: FormData) {
   });
 
   if (error) return { error: "No se pudo cargar el pase histórico." };
+
+  // Sincronizar el club del jugador en todas sus categorías y activar su ficha
+  try {
+    const admin = createLfsAdminClient();
+    await admin
+      .from("player_categories")
+      .update({ club_id: toClubId })
+      .eq("player_id", jugador.id);
+    await admin
+      .from("players")
+      .update({ status: "activo" })
+      .eq("id", jugador.id);
+  } catch {
+    // silencioso
+  }
 
   revalidarPases();
   return { ok: true, jugador: `${jugador.last_name}, ${jugador.first_name}` };

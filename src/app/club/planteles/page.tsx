@@ -10,6 +10,8 @@ import {
 } from "@/components/club/PlantelClubInteractivo";
 import { BotonCerrarSesion } from "@/components/auth/BotonCerrarSesion";
 
+export const dynamic = "force-dynamic";
+
 /**
  * PLANTELES DEL CLUB (rol club) — Paso 10B.
  * Flujo: 1) el club CREA sus planteles (uno por categoría) →
