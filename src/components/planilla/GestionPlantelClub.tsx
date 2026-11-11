@@ -23,6 +23,7 @@ import {
   quitarConvocado,
   alternarTitular,
   confirmarMiConvocatoria,
+  guardarNumeroCamisetaConvocado,
   type Convocable,
   type PlanillaCompleta,
 } from "@/lib/actions/planilla.actions";
@@ -231,6 +232,27 @@ function PanelConvocatoria({
                       key={c.id}
                       className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2"
                     >
+                      {/* Editor de número de camiseta para el partido */}
+                      <div className="flex items-center gap-1 shrink-0" title="Número de camiseta para este partido">
+                        <span className="text-[10px] font-bold text-slate-400">#</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={99}
+                          defaultValue={c.numeroCamiseta ?? ""}
+                          placeholder="—"
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            const num = val === "" ? null : Number(val);
+                            if (num !== c.numeroCamiseta) {
+                              ejecutar(() => guardarNumeroCamisetaConvocado(matchId, c.id, num));
+                            }
+                          }}
+                          disabled={pendiente}
+                          className="w-11 h-8 rounded-lg border border-slate-300 text-center text-xs font-black text-[#1A2A44] bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#F97316]"
+                        />
+                      </div>
+
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-[#1A2A44] truncate">{c.nombre}</p>
                         <p className="text-[10px] text-slate-400">DNI {c.dni}</p>
@@ -287,7 +309,14 @@ function PanelConvocatoria({
                       className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-[#1A2A44] truncate">{c.nombre}</p>
+                        <p className="text-sm font-bold text-[#1A2A44] truncate">
+                          {c.numeroCamiseta ? (
+                            <span className="inline-block px-1.5 py-0.2 mr-1 rounded bg-slate-100 text-slate-700 font-mono text-xs">
+                              #{c.numeroCamiseta}
+                            </span>
+                          ) : null}
+                          {c.nombre}
+                        </p>
                         <p className="text-[10px] text-slate-400">
                           {c.categoria} · DNI {c.dni}
                         </p>

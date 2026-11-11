@@ -150,17 +150,57 @@ function AdjuntoMensaje({
 /** Tarjeta destacada de Comunicado Oficial dentro del chat. */
 function TarjetaComunicado({ mensaje, esMio }: { mensaje: Mensaje; esMio: boolean }) {
   const meta = leerMetadata(mensaje.metadata);
+  const prioridad = meta.prioridad ?? "normal";
+  const adjuntosLista =
+    meta.adjuntos && meta.adjuntos.length > 0
+      ? meta.adjuntos
+      : mensaje.attachment_path && mensaje.attachment_name
+        ? [
+            {
+              path: mensaje.attachment_path,
+              name: mensaje.attachment_name,
+              type: mensaje.attachment_type ?? "application/octet-stream",
+              size: 0,
+            },
+          ]
+        : [];
+
+  const bordePrioridad =
+    prioridad === "urgente"
+      ? "border-red-300"
+      : prioridad === "importante"
+        ? "border-amber-300"
+        : "border-orange-200";
+
+  const franjaPrioridad =
+    prioridad === "urgente"
+      ? "bg-gradient-to-r from-red-700 to-red-600"
+      : prioridad === "importante"
+        ? "bg-gradient-to-r from-amber-600 to-orange-600"
+        : "bg-gradient-to-r from-[#1A2A44] to-[#2A3D5F]";
+
   return (
     <div className="w-full max-w-[92%] sm:max-w-[80%]">
-      <div className="rounded-2xl overflow-hidden border border-orange-200 shadow-md bg-white">
+      <div className={`rounded-2xl overflow-hidden border ${bordePrioridad} shadow-md bg-white`}>
         {/* Franja oficial */}
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-[#1A2A44] to-[#2A3D5F] text-white">
+        <div className={`flex items-center gap-2 px-4 py-2.5 ${franjaPrioridad} text-white flex-wrap`}>
           <Megaphone className="w-4 h-4 text-[#F97316] shrink-0" />
           <span className="text-[10px] font-black uppercase tracking-[0.14em]">
-            Comunicado Oficial
+            {meta.origen === "club" ? "Mensaje Oficial del Club" : "Comunicado Oficial"}
+            {meta.categoria ? ` · ${meta.categoria}` : ""}
           </span>
+          {prioridad === "urgente" && (
+            <span className="text-[10px] font-black uppercase bg-white/20 px-2 py-0.5 rounded-full">
+              Urgente
+            </span>
+          )}
+          {prioridad === "importante" && (
+            <span className="text-[10px] font-black uppercase bg-white/20 px-2 py-0.5 rounded-full">
+              Importante
+            </span>
+          )}
           {meta.sin_respuestas && (
-            <span className="ml-auto flex items-center gap-1 text-[10px] font-bold text-orange-200 shrink-0">
+            <span className="ml-auto flex items-center gap-1 text-[10px] font-bold text-orange-100 shrink-0">
               <Lock className="w-3 h-3" /> Sin respuestas
             </span>
           )}
@@ -176,13 +216,18 @@ function TarjetaComunicado({ mensaje, esMio }: { mensaje: Mensaje; esMio: boolea
               dangerouslySetInnerHTML={{ __html: mensaje.body }}
             />
           )}
-          {mensaje.attachment_path && mensaje.attachment_name && (
-            <AdjuntoMensaje
-              ruta={mensaje.attachment_path}
-              nombre={mensaje.attachment_name}
-              tipo={mensaje.attachment_type}
-              esMio={false}
-            />
+          {adjuntosLista.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {adjuntosLista.map((adj) => (
+                <AdjuntoMensaje
+                  key={adj.path}
+                  ruta={adj.path}
+                  nombre={adj.name}
+                  tipo={adj.type}
+                  esMio={false}
+                />
+              ))}
+            </div>
           )}
           <div className="flex items-center justify-end gap-1 text-slate-400">
             <span className="text-[10px]">{fechaCompleta(mensaje.created_at)}</span>

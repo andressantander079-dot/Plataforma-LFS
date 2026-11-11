@@ -384,6 +384,20 @@ describe("InscripcionJugadorInputSchema — casos borde", () => {
   it("rechaza un player_id que no es UUID", () => {
     expect(InscripcionJugadorInputSchema.safeParse({ ...base, player_id: "abc" }).success).toBe(false);
   });
+
+  it("acepta numero_camiseta válido (1 al 99) o ausente/null", () => {
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: 10 }).success).toBe(true);
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: 1 }).success).toBe(true);
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: 99 }).success).toBe(true);
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: null }).success).toBe(true);
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: undefined }).success).toBe(true);
+  });
+
+  it("rechaza numero_camiseta fuera de rango (0, 100) o no entero", () => {
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: 0 }).success).toBe(false);
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: 100 }).success).toBe(false);
+    expect(InscripcionJugadorInputSchema.safeParse({ ...base, numero_camiseta: 10.5 }).success).toBe(false);
+  });
 });
 
 describe("PaseSettingsSchema — casos borde", () => {

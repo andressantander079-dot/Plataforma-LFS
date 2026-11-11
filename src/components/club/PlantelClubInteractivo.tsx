@@ -54,6 +54,7 @@ export interface JugadorFila {
   status: EstadoJugador;
   fechaNacimiento: string | null;
   fotoUrl: string | null;
+  numeroCamiseta?: number | null;
   documentosCargados: string[]; // claves presentes en players.documents
   documents?: Record<string, string>;
 }
@@ -494,6 +495,7 @@ export function PlantelClubInteractivo({
                 <table className="min-w-full text-xs">
                   <thead>
                     <tr className="text-slate-400 font-bold uppercase border-b text-left bg-slate-50/30">
+                      <th className="py-2.5 px-3 text-center">N°</th>
                       <th className="py-2.5 px-4">Jugador</th>
                       <th className="py-2.5 px-2">DNI</th>
                       <th className="py-2.5 px-2">Edad</th>
@@ -513,6 +515,15 @@ export function PlantelClubInteractivo({
                       return (
                         <Fragment key={j.id}>
                           <tr className="border-b border-slate-100 hover:bg-slate-50/60 transition">
+                            <td className="py-2.5 px-3 text-center">
+                              {j.numeroCamiseta ? (
+                                <span className="inline-block font-mono font-black text-xs px-2 py-0.5 rounded-lg bg-orange-100 text-[#F97316] border border-orange-200">
+                                  #{j.numeroCamiseta}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-300 font-mono italic" title="Sin camiseta asignada">—</span>
+                              )}
+                            </td>
                             <td className="py-2.5 px-4">
                               <div className="flex items-center gap-2.5">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -579,7 +590,7 @@ export function PlantelClubInteractivo({
                           </tr>
                           {abierta && (
                             <tr className="border-b border-slate-100 bg-slate-50/50">
-                              <td colSpan={6} className="px-4 py-4">
+                              <td colSpan={7} className="px-4 py-4">
                                 <FichaJugadorClub jugador={j} clubId={clubId} />
                               </td>
                             </tr>

@@ -50,6 +50,7 @@ export interface JugadorPlantel {
   status: EstadoJugador;
   fechaNacimiento?: string | null;
   fotoUrl?: string | null;
+  numeroCamiseta?: number | null;
   categories: string[];
   documents: Record<string, string>;
 }
@@ -397,6 +398,14 @@ export function PlantelInteractivo({
                                 <span className="font-bold text-[#1A2A44] text-sm truncate">
                                   {player.fullName}
                                 </span>
+                                {player.numeroCamiseta && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded bg-orange-100 text-[#F97316] font-mono text-[10px] font-black border border-orange-200"
+                                    title={`Camiseta #${player.numeroCamiseta}`}
+                                  >
+                                    #{player.numeroCamiseta}
+                                  </span>
+                                )}
                                 {esMenor && (
                                   <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[9px] font-black uppercase">
                                     Menor

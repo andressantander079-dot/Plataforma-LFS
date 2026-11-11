@@ -13,8 +13,10 @@ import {
   XCircle,
   Upload,
   ExternalLink,
+  Shirt,
 } from "lucide-react";
 import { subirFotoJugador, guardarNacimientoJugador } from "@/lib/actions/pases.actions";
+import { guardarNumeroCamisetaJugador } from "@/lib/actions/equipos.actions";
 import {
   subirDocumento,
   obtenerUrlDocumento,
@@ -42,10 +44,33 @@ export function FichaJugadorClub({
   const inputFotoRef = useRef<HTMLInputElement>(null);
   const inputsDocRef = useRef<Record<string, HTMLInputElement | null>>({});
   const [fecha, setFecha] = useState(jugador.fechaNacimiento ?? "");
+  const [numeroCamiseta, setNumeroCamiseta] = useState<string>(
+    jugador.numeroCamiseta !== undefined && jugador.numeroCamiseta !== null
+      ? String(jugador.numeroCamiseta)
+      : ""
+  );
   const [docSubiendo, setDocSubiendo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pendiente, startTransition] = useTransition();
+
+  function guardarCamiseta() {
+    setError(null);
+    setOk(null);
+    const num = numeroCamiseta.trim() === "" ? null : parseInt(numeroCamiseta, 10);
+    if (num !== null && (isNaN(num) || num < 1 || num > 99)) {
+      setError("El número de camiseta debe ser entre 1 y 99.");
+      return;
+    }
+    startTransition(async () => {
+      const res = await guardarNumeroCamisetaJugador(jugador.id, clubId, num);
+      if (res.error) setError(res.error);
+      else {
+        setOk(num !== null ? `✅ Camiseta #${num} guardada.` : "✅ Camiseta removida.");
+        router.refresh();
+      }
+    });
+  }
 
   function subirFoto(archivo: File | null) {
     if (!archivo) return;
@@ -183,6 +208,47 @@ export function FichaJugadorClub({
         <p className="text-[10px] text-slate-400">
           Obligatoria: define su categoría (solo puede inscribirse en la de su año de nacimiento) y,
           si es menor de 18, sus pases necesitan la firma de un tutor.
+        </p>
+      </div>
+
+      {/* Número de camiseta / Dorsal */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-3 sm:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+            <Shirt className="w-3.5 h-3.5 text-[#F97316]" /> Número de Camiseta (Dorsal oficial)
+          </p>
+          {numeroCamiseta && (
+            <span className="text-[11px] font-mono font-black text-[#F97316] bg-orange-50 px-2 py-0.5 rounded-md border border-orange-200">
+              Camiseta actual: #{numeroCamiseta}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 max-w-md">
+          <input
+            type="number"
+            min={1}
+            max={99}
+            value={numeroCamiseta}
+            placeholder="Ej: 10 (1 a 99)"
+            onChange={(e) => setNumeroCamiseta(e.target.value)}
+            className="w-36 rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-mono font-bold text-[#1A2A44] focus:outline-none focus:ring-2 focus:ring-[#F97316]/60"
+          />
+          <button
+            type="button"
+            disabled={pendiente}
+            onClick={guardarCamiseta}
+            className="px-3.5 py-2 rounded-xl bg-[#1A2A44] text-white text-[11px] font-bold hover:bg-[#1A2A44]/90 transition disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {pendiente ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Save className="w-3.5 h-3.5" />
+            )}
+            Guardar dorsal
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-400">
+          Número predeterminado en las planillas de juego y convocatorias del club. Los profesores pueden ajustarlo al convocar a cada partido y los árbitros durante el encuentro.
         </p>
       </div>
 

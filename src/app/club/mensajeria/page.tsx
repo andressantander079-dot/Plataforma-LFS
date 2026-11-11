@@ -6,11 +6,15 @@ import {
   obtenerOCrearConversacion,
   obtenerMensajes,
 } from "@/lib/actions/mensajeria.actions";
-import { VentanaChat, type Mensaje } from "@/components/mensajeria/VentanaChat";
+import { type Mensaje } from "@/components/mensajeria/VentanaChat";
+import { MensajeriaClub } from "@/components/mensajeria/MensajeriaClub";
+
+export const dynamic = "force-dynamic";
 
 /**
  * MENSAJERÍA DEL CLUB
- * Chat privado y en tiempo real con la federación.
+ * Panel empresarial para comunicarse en tiempo real con la federación,
+ * redactar notas oficiales con editor de texto enriquecido, adjuntos, borradores y envíos programados.
  */
 export default async function ClubMensajeria() {
   const supabase = await createLfsServerClient();
@@ -57,28 +61,24 @@ export default async function ClubMensajeria() {
   const mensajes = (await obtenerMensajes(conversacion.id)) as Mensaje[];
 
   return (
-    <div className="max-w-5xl mx-auto flex flex-col gap-6 h-[calc(100vh-6rem)]">
-      <div className="flex flex-col gap-1 border-b border-slate-200 pb-4 shrink-0">
+    <div className="max-w-6xl mx-auto flex flex-col gap-4">
+      <div className="flex flex-col gap-1 border-b border-slate-200 pb-3 shrink-0">
         <h1 className="font-serif text-2xl font-black text-[#1A2A44] flex items-center gap-2">
           <MessageSquare className="w-7 h-7 text-[#F97316]" />
           Mensajería Oficial
         </h1>
         <p className="text-slate-500 text-xs">
-          Comunicate en tiempo real con la federación para consultas, altas de usuarios o gestiones.
+          Comunicate en tiempo real con la federación para consultas, notas oficiales, solicitudes o gestiones.
         </p>
       </div>
 
-      {/* Chat en contenedor flexible de altura completa */}
-      <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-0 flex flex-col">
-        <VentanaChat
-          conversacionId={conversacion.id}
-          mensajesIniciales={mensajes}
-          usuarioActualId={user.id}
-          titulo="Federación LFS"
-          subtitulo="Administración de la liga — respuesta en tiempo real"
-          iniciales="LFS"
-        />
-      </div>
+      <MensajeriaClub
+        conversacionId={conversacion.id}
+        mensajesIniciales={mensajes}
+        usuarioActualId={user.id}
+        clubId={club.id}
+        clubNombre={club.name}
+      />
     </div>
   );
 }

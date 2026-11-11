@@ -8,12 +8,21 @@ import {
   puedeEscribir,
   validarAsunto,
   validarCuerpoHtml,
+  validarArchivoAdjunto,
+  formatearTamanioArchivo,
+  validarFechaProgramada,
+  TIPOGRAFIAS_DISPONIBLES,
+  TAMANIOS_FUENTE_DISPONIBLES,
+  CATEGORIAS_MENSAJE,
+  PRIORIDADES_MENSAJE,
+  MAX_BYTES_ADJUNTO,
   TIPO_COMUNICADO,
 } from "../lib/core/rules/mensajeriaRules";
 
 /**
  * MENSAJERÍA PREMIUM — Reglas de negocio y sanitizer HTML
- * Cubre seguridad (XSS), metadata de comunicados y validaciones.
+ * Cubre seguridad (XSS), 10 tipografías, tamaños de letra, sangrías,
+ * metadata de comunicados, adjuntos hasta 10 MB y programación de envíos.
  */
 
 describe("sanitizarHtml — seguridad XSS", () => {
@@ -71,7 +80,7 @@ describe("sanitizarHtml — seguridad XSS", () => {
   });
 });
 
-describe("sanitizarHtml — conserva formato legítimo", () => {
+describe("sanitizarHtml — conserva formato legítimo y las 10 tipografías", () => {
   it("conserva negrita, itálica, subrayado y tachado", () => {
     const html = "<b>N</b><strong>N2</strong><i>I</i><em>I2</em><u>U</u><s>S</s>";
     expect(sanitizarHtml(html)).toBe(html);
@@ -86,6 +95,36 @@ describe("sanitizarHtml — conserva formato legítimo", () => {
   it("conserva colores de texto y resaltado", () => {
     const html = '<span style="color: #F97316; background-color: yellow">Aviso</span>';
     expect(sanitizarHtml(html)).toBe(html);
+  });
+
+  it("dispone de las 10 familias tipográficas requeridas y conserva font-family, font-size y sangría", () => {
+    expect(TIPOGRAFIAS_DISPONIBLES.length).toBe(10);
+    const nombres = TIPOGRAFIAS_DISPONIBLES.map((t) => t.nombre);
+    expect(nombres).toEqual([
+      "Arial",
+      "Helvetica",
+      "Roboto",
+      "Open Sans",
+      "Lato",
+      "Montserrat",
+      "Poppins",
+      "Georgia",
+      "Times New Roman",
+      "Verdana",
+    ]);
+
+    for (const font of TIPOGRAFIAS_DISPONIBLES) {
+      const html = `<span style="font-family: ${font.cssFamily}; font-size: 18px">Texto</span>`;
+      const limpio = sanitizarHtml(html);
+      expect(limpio).toContain("font-family:");
+      expect(limpio).toContain("font-size: 18px");
+    }
+
+    const conSangria = '<p style="margin-left: 40px; padding-left: 20px">Indented</p><hr>';
+    const limpioSangria = sanitizarHtml(conSangria);
+    expect(limpioSangria).toContain("margin-left: 40px");
+    expect(limpioSangria).toContain("padding-left: 20px");
+    expect(limpioSangria).toContain("<hr>");
   });
 
   it("conserva enlaces https y fuerza target/rel seguros", () => {
@@ -118,13 +157,18 @@ describe("textoPlanoDeHtml", () => {
   });
 });
 
-describe("metadata de mensajes — comunicados", () => {
+describe("metadata de mensajes — comunicados, prioridad y adjuntos", () => {
   const comunicado = {
     tipo: TIPO_COMUNICADO,
     asunto: "Fecha 12 suspendida",
     sin_respuestas: true,
     html: true,
     anuncio_id: "abc-123",
+    prioridad: "urgente",
+    categoria: "Torneo y Fixture",
+    adjuntos: [
+      { path: "federacion/1.pdf", name: "boletin.pdf", type: "application/pdf", size: 2048 },
+    ],
   };
 
   it("leerMetadata tolera valores inválidos", () => {
@@ -133,9 +177,14 @@ describe("metadata de mensajes — comunicados", () => {
     expect(leerMetadata([1, 2])).toEqual({});
   });
 
-  it("detecta comunicados y bloqueo de respuestas", () => {
+  it("detecta comunicados, bloqueo de respuestas, prioridad, categoría y adjuntos", () => {
     expect(esComunicado(comunicado)).toBe(true);
     expect(bloqueaRespuestas(comunicado)).toBe(true);
+    const meta = leerMetadata(comunicado);
+    expect(meta.prioridad).toBe("urgente");
+    expect(meta.categoria).toBe("Torneo y Fixture");
+    expect(meta.adjuntos?.length).toBe(1);
+    expect(meta.adjuntos?.[0].name).toBe("boletin.pdf");
     expect(esComunicado({ tipo: "chat" })).toBe(false);
     expect(bloqueaRespuestas({ tipo: "chat" })).toBe(false);
   });
@@ -151,7 +200,7 @@ describe("metadata de mensajes — comunicados", () => {
   });
 });
 
-describe("validaciones del compositor", () => {
+describe("validaciones del compositor, adjuntos (10 MB) y programación", () => {
   it("asunto: mínimo 3, máximo 120 caracteres", () => {
     expect(validarAsunto("ab").ok).toBe(false);
     expect(validarAsunto("   ").ok).toBe(false);
@@ -162,5 +211,37 @@ describe("validaciones del compositor", () => {
   it("cuerpo: rechaza vacío (aunque tenga solo etiquetas)", () => {
     expect(validarCuerpoHtml("<p><br></p>").ok).toBe(false);
     expect(validarCuerpoHtml("<p>Hola club</p>").ok).toBe(true);
+  });
+
+  it("archivos adjuntos: valida formatos permitidos (JPG, JPEG, PNG, WEBP, PDF) y límite de 10 MB", () => {
+    expect(
+      validarArchivoAdjunto({ name: "foto.jpg", type: "image/jpeg", size: 500_000 }).ok
+    ).toBe(true);
+    expect(
+      validarArchivoAdjunto({ name: "foto.png", type: "image/png", size: MAX_BYTES_ADJUNTO }).ok
+    ).toBe(true);
+    expect(
+      validarArchivoAdjunto({ name: "foto.webp", type: "image/webp", size: 1024 }).ok
+    ).toBe(true);
+    expect(
+      validarArchivoAdjunto({
+        name: "pesado.jpg",
+        type: "image/jpeg",
+        size: MAX_BYTES_ADJUNTO + 1,
+      }).ok
+    ).toBe(false);
+    expect(
+      validarArchivoAdjunto({ name: "script.exe", type: "application/x-msdownload", size: 1024 }).ok
+    ).toBe(false);
+    expect(formatearTamanioArchivo(1024 * 1024 * 2.5)).toBe("2.50 MB");
+  });
+
+  it("programación de envíos: exige fecha y hora futuras", () => {
+    const base = new Date("2026-11-10T12:00:00Z");
+    expect(validarFechaProgramada("2026-11-10T11:00:00Z", base).ok).toBe(false);
+    expect(validarFechaProgramada("2026-11-11T15:00:00Z", base).ok).toBe(true);
+    expect(TAMANIOS_FUENTE_DISPONIBLES.length).toBeGreaterThanOrEqual(8);
+    expect(CATEGORIAS_MENSAJE.length).toBeGreaterThanOrEqual(5);
+    expect(Object.keys(PRIORIDADES_MENSAJE)).toEqual(["normal", "importante", "urgente"]);
   });
 });

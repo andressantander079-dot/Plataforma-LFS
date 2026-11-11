@@ -348,6 +348,16 @@ export async function inscribirJugador(
     return { ok: false, error: "La foto no puede pesar más de 5 MB." };
   }
 
+  // Número de camiseta opcional (1 a 99)
+  const numeroCamisetaRaw = formData.get("numero_camiseta");
+  let numero_camiseta: number | null = null;
+  if (numeroCamisetaRaw && String(numeroCamisetaRaw).trim() !== "") {
+    const num = Number(numeroCamisetaRaw);
+    if (!Number.isNaN(num) && num >= 1 && num <= 99) {
+      numero_camiseta = Math.floor(num);
+    }
+  }
+
   // Documentos de inscripción (Paso 10B):
   // DNI + CEMAD médico + CEMAD de autorización + comprobante de federación.
   // Si no se adjuntan todos en el momento, se aceptan los disponibles y el jugador
@@ -413,17 +423,35 @@ export async function inscribirJugador(
   // Las inscripciones enviadas por los clubes quedan en estado "pendiente"
   // para ser revisadas y dictaminadas (aprobar / en deuda / denegar) en Trámites por la federación.
   const statusInicial = esAdmin ? "activo" : "pendiente";
-  const { data: player, error: playerError } = await supabase
+  let playerRes = await supabase
     .from("players")
     .insert({
       dni,
       first_name,
       last_name,
       fecha_nacimiento,
+      numero_camiseta,
       status: statusInicial,
     })
     .select("id")
     .single();
+
+  // Fallback si la columna numero_camiseta todavía no existe en la base de datos
+  if (playerRes.error && playerRes.error.message?.includes("numero_camiseta")) {
+    playerRes = await supabase
+      .from("players")
+      .insert({
+        dni,
+        first_name,
+        last_name,
+        fecha_nacimiento,
+        status: statusInicial,
+      })
+      .select("id")
+      .single();
+  }
+
+  const { data: player, error: playerError } = playerRes;
 
   if (playerError) {
     if (playerError.code === "23505") {
@@ -747,5 +775,66 @@ export async function actualizarConfiguracionClub(
   }
 
   revalidatePath("/club/configuracion");
+  return { ok: true };
+}
+
+/**
+ * Guarda o actualiza el número de camiseta oficial del jugador (1 al 99).
+ * Puede ser ejecutado por la federación o por el propio club del jugador.
+ */
+export async function guardarNumeroCamisetaJugador(
+  playerId: string,
+  clubId: string | null | undefined,
+  numero: number | null
+): Promise<ActionResult> {
+  if (!playerId) return { ok: false, error: "Identificador de jugador inválido." };
+  if (numero !== null && (numero < 1 || numero > 99)) {
+    return { ok: false, error: "El número de camiseta debe estar entre 1 y 99." };
+  }
+
+  const supabase = await createLfsServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { ok: false, error: "No hay sesión activa. Iniciá sesión nuevamente." };
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, club_id")
+    .eq("id", user.id)
+    .single();
+
+  const esAdmin = profile?.role === "admin";
+  const idClubFinal = clubId || profile?.club_id;
+  const esClubPropio = profile?.role === "club" && (!idClubFinal || profile.club_id === idClubFinal);
+
+  if (!esAdmin && !esClubPropio) {
+    return { ok: false, error: "No tenés permisos para modificar este dorsal." };
+  }
+
+  const { error: updErr } = await supabase
+    .from("players")
+    .update({ numero_camiseta: numero })
+    .eq("id", playerId);
+
+  if (updErr) {
+    const admin = createLfsAdminClient();
+    const { error: adminErr } = await admin
+      .from("players")
+      .update({ numero_camiseta: numero })
+      .eq("id", playerId);
+
+    if (adminErr) {
+      return { ok: false, error: "No se pudo actualizar el número de camiseta." };
+    }
+  }
+
+  revalidatePath("/club/planteles");
+  if (idClubFinal) {
+    revalidatePath(`/admin/equipos/${idClubFinal}/plantel`);
+  }
   return { ok: true };
 }

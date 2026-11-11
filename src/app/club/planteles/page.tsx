@@ -27,6 +27,7 @@ interface PlayerRow {
     dni: string;
     first_name: string;
     last_name: string;
+    numero_camiseta?: number | null;
     status: EstadoJugador;
     fecha_nacimiento: string | null;
     foto_path: string | null;
@@ -110,7 +111,7 @@ export default async function ClubPlanteles() {
   const { data: rows } = await supabase
     .from("player_categories")
     .select(
-      "player_id, category_id, players ( id, dni, first_name, last_name, status, fecha_nacimiento, foto_path, documents )"
+      "player_id, category_id, players ( id, dni, first_name, last_name, numero_camiseta, status, fecha_nacimiento, foto_path, documents )"
     )
     .eq("club_id", clubId);
 
@@ -130,6 +131,7 @@ export default async function ClubPlanteles() {
       status: row.players.status,
       fechaNacimiento: row.players.fecha_nacimiento,
       fotoUrl: row.players.foto_path ? `${urlFotos}${row.players.foto_path}` : null,
+      numeroCamiseta: row.players.numero_camiseta ?? null,
       documentosCargados: Object.keys(docsMap),
       documents: docsMap,
     });

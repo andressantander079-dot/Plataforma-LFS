@@ -242,6 +242,25 @@ export function PanelInscribirJugador({
               </p>
             </div>
 
+            {/* Número de camiseta / Dorsal */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                <span>Número de camiseta</span>
+                <span className="text-[10px] text-slate-400 font-normal">Opcional (1 al 99)</span>
+              </label>
+              <input
+                type="number"
+                name="numero_camiseta"
+                min={1}
+                max={99}
+                placeholder="Ej: 10"
+                className={inputClass}
+              />
+              <p className="text-[10px] text-slate-400">
+                Número oficial en las planillas de juego y convocatorias del club. Puede modificarse en cada partido.
+              </p>
+            </div>
+
             {/* Foto obligatoria */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-slate-700">

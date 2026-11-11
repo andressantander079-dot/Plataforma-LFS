@@ -48,6 +48,13 @@ export const InscripcionJugadorInputSchema = z.object({
     ),
   foto_path: z.string().trim().min(1, "La foto de perfil es obligatoria."),
   category_ids: z.array(z.string().uuid()).min(1, "Debe seleccionar al menos una categoría."),
+  numero_camiseta: z
+    .number()
+    .int("El número de camiseta debe ser un entero.")
+    .min(1, "El número de camiseta debe estar entre 1 y 99.")
+    .max(99, "El número de camiseta no puede ser mayor a 99.")
+    .nullable()
+    .optional(),
 });
 
 export type InscripcionJugadorInput = z.infer<typeof InscripcionJugadorInputSchema>;

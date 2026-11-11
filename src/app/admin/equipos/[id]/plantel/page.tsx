@@ -25,6 +25,7 @@ interface PlayerRow {
     status: EstadoJugador;
     fecha_nacimiento?: string | null;
     foto_path?: string | null;
+    numero_camiseta?: number | null;
     documents: Record<string, string> | null;
   } | null;
   categories: { id: string; name: string } | null;
@@ -66,7 +67,7 @@ export default async function ClubPlantelAdmin({
   const { data: rows } = await supabase
     .from("player_categories")
     .select(
-      "player_id, players ( id, dni, first_name, last_name, status, fecha_nacimiento, foto_path, documents ), categories ( id, name )"
+      "player_id, players ( id, dni, first_name, last_name, status, fecha_nacimiento, foto_path, documents, numero_camiseta ), categories ( id, name )"
     )
     .eq("club_id", id);
 
@@ -134,6 +135,7 @@ export default async function ClubPlantelAdmin({
         status: row.players.status,
         fechaNacimiento: row.players.fecha_nacimiento ?? null,
         fotoUrl: row.players.foto_path ? `${urlFotos}${row.players.foto_path}` : null,
+        numeroCamiseta: row.players.numero_camiseta ?? null,
         categories: categoria ? [categoria] : [],
         documents: (row.players.documents as Record<string, string>) ?? {},
       });

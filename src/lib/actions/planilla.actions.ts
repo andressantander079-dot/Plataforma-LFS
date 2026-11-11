@@ -24,6 +24,7 @@ export interface Convocable {
   dni: string;
   categoria: string; // categoría en la que está registrado dentro del club
   suspendido: string | null; // motivo legible si tiene suspensión activa
+  numeroCamiseta?: number | null;
 }
 
 export interface Convocado {
@@ -34,6 +35,7 @@ export interface Convocado {
   teamId: string;
   esTitular: boolean;
   agregadoPor: "club" | "arbitro" | "admin";
+  numeroCamiseta?: number | null;
 }
 
 export interface EventoPlanilla {
@@ -264,7 +266,7 @@ export async function obtenerPlanilla(matchId: string): Promise<PlanillaCompleta
     const [{ data: filas }, { data: evs }] = await Promise.all([
       supabase
         .from("match_sheet_players")
-        .select("id, team_id, player_id, es_titular, agregado_por, players(first_name, last_name, dni)")
+        .select("id, team_id, player_id, es_titular, agregado_por, numero_camiseta, players(first_name, last_name, dni)")
         .eq("sheet_id", sheet.id)
         .order("created_at"),
       supabase
@@ -287,6 +289,7 @@ export async function obtenerPlanilla(matchId: string): Promise<PlanillaCompleta
         teamId: f.team_id,
         esTitular: f.es_titular,
         agregadoPor: f.agregado_por as Convocado["agregadoPor"],
+        numeroCamiseta: (f.numero_camiseta ?? null) as number | null,
       };
     });
 
@@ -395,7 +398,7 @@ export async function obtenerConvocables(
   const { data: registros, error } = await supabase
     .from("player_categories")
     .select(
-      "player_id, players!inner(id, first_name, last_name, dni, status), categories!inner(name, level_hierarchy)"
+      "player_id, players!inner(id, first_name, last_name, dni, status, numero_camiseta), categories!inner(name, level_hierarchy)"
     )
     .eq("club_id", team.club_id)
     .in("players.status", ["activo", "en_deuda"])
@@ -412,6 +415,7 @@ export async function obtenerConvocables(
       last_name: string;
       dni: string;
       status: string;
+      numero_camiseta?: number | null;
     };
     const c = r.categories as unknown as { name: string; level_hierarchy: number };
     const actual = porJugador.get(p.id);
@@ -423,6 +427,7 @@ export async function obtenerConvocables(
         categoria: c.name,
         nivel: c.level_hierarchy,
         suspendido: null,
+        numeroCamiseta: p.numero_camiseta ?? null,
       });
     }
   });
@@ -583,18 +588,62 @@ export async function convocarJugador(
     }
   }
 
+  // Consultar número de camiseta predeterminado del jugador
+  const { data: playerInfo } = await supabase
+    .from("players")
+    .select("numero_camiseta")
+    .eq("id", playerId)
+    .maybeSingle();
+
   const { error } = await supabase.from("match_sheet_players").insert({
     sheet_id: sheet.id,
     team_id: teamId,
     player_id: playerId,
     es_titular: true,
     agregado_por: esAdmin ? "admin" : "club",
+    numero_camiseta: playerInfo?.numero_camiseta ?? null,
   });
   if (error) {
     if (error.code === "23505") return { error: "Ese jugador ya está convocado." };
     return { error: "No se pudo convocar al jugador." };
   }
 
+  revalidarPlanillas(matchId);
+  return { ok: true };
+}
+
+/**
+ * Permite al club (profesor/delegado) o al árbitro modificar el número
+ * de camiseta de un jugador convocado para un partido específico.
+ */
+export async function guardarNumeroCamisetaConvocado(
+  matchId: string,
+  convocadoId: string,
+  numero: number | null
+): Promise<{ ok?: boolean; error?: string }> {
+  if (numero !== null && (numero < 1 || numero > 99)) {
+    return { error: "El número de camiseta debe estar entre 1 y 99." };
+  }
+  const { supabase, role } = await obtenerContexto();
+
+  const { data: conv } = await supabase
+    .from("match_sheet_players")
+    .select("id, sheet_id, match_sheets(status)")
+    .eq("id", convocadoId)
+    .single();
+
+  if (!conv) return { error: "Convocado no encontrado." };
+  const sheetStatus = (conv.match_sheets as unknown as { status: string })?.status;
+  if (role !== "admin" && sheetStatus === "aprobada") {
+    return { error: "La planilla ya está aprobada y cerrada." };
+  }
+
+  const { error } = await supabase
+    .from("match_sheet_players")
+    .update({ numero_camiseta: numero })
+    .eq("id", convocadoId);
+
+  if (error) return { error: "No se pudo actualizar el número de camiseta." };
   revalidarPlanillas(matchId);
   return { ok: true };
 }

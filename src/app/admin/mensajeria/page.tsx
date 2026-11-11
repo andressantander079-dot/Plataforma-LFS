@@ -4,9 +4,11 @@ import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
 import { obtenerPanelMensajeriaAdmin } from "@/lib/actions/mensajeria.actions";
 import { MensajeriaAdmin } from "@/components/mensajeria/MensajeriaAdmin";
 
+export const dynamic = "force-dynamic";
+
 /**
  * MENSAJERÍA — Panel de la federación
- * Chat privado y en tiempo real con cada club afiliado.
+ * Chat privado y en tiempo real con cada club afiliado y cuerpo arbitral.
  */
 export default async function AdminMensajeria() {
   const supabase = await createLfsServerClient();
@@ -34,7 +36,7 @@ export default async function AdminMensajeria() {
           Mensajería
         </h1>
         <p className="text-slate-500 text-xs mt-0.5">
-          Comunicación directa y en tiempo real con cada club afiliado.
+          Comunicación oficial, difusión de comunicados y chat en tiempo real con clubes y árbitros.
         </p>
       </div>
 
