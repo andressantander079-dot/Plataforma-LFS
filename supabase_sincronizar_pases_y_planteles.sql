@@ -41,3 +41,4 @@ BEGIN
   RAISE NOTICE 'Total de pases efectivos en sistema: %', v_pases_efectivos;
   RAISE NOTICE 'Sincronización completada con éxito. Los planteles ahora reflejan el club de destino real.';
 END $$;
+

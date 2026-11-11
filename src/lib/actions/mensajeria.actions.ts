@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createLfsServerClient } from "@/lib/infrastructure/supabase/server";
+import { createLfsAdminClient } from "@/lib/infrastructure/supabase/admin";
 import {
   sanitizarHtml,
   textoPlanoDeHtml,
@@ -224,12 +225,28 @@ export async function obtenerPanelMensajeriaAdmin(): Promise<ConversacionResumen
 
 /**
  * Devuelve la conversación de un club; si no existe, la crea.
- * La puede llamar el admin (para cualquier club) o el club (solo la suya,
- * garantizado por RLS).
+ * La puede llamar el admin (para cualquier club) o el club (su propio club).
+ * La creación de la conversación usa createLfsAdminClient() para garantizar bypass de RLS
+ * e inicializar el canal oficial sin bloqueos de permisos.
  */
 export async function obtenerOCrearConversacion(clubId: string): Promise<Conversacion> {
-  const { supabase } = await obtenerUsuarioOError();
+  const { supabase, user } = await obtenerUsuarioOError();
 
+  // Validar permisos del usuario: debe ser admin de la liga o miembro del club solicitado
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, club_id")
+    .eq("id", user.id)
+    .single();
+
+  const esAdminUser = profile?.role === "admin";
+  const esSuClub = profile?.club_id === clubId;
+
+  if (!esAdminUser && !esSuClub) {
+    throw new Error("No tenés permiso para acceder a esta conversación.");
+  }
+
+  // 1. Intentar lectura existente
   const { data: existente } = await supabase
     .from("conversations")
     .select("id, club_id, arbitro_id, created_at, last_message_at")
@@ -238,29 +255,44 @@ export async function obtenerOCrearConversacion(clubId: string): Promise<Convers
 
   if (existente) return existente as Conversacion;
 
-  const { data: creada, error } = await supabase
+  // 2. Si no existe, crear usando cliente admin (service_role) para garantizar bypass de RLS
+  const admin = createLfsAdminClient();
+  const { data: creada, error } = await admin
     .from("conversations")
     .insert({ club_id: clubId })
     .select("id, club_id, arbitro_id, created_at, last_message_at")
     .single();
 
-  if (error) {
-    // Carrera: otro la creó justo antes → la volvemos a leer
-    const { data: relectura } = await supabase
-      .from("conversations")
-      .select("id, club_id, arbitro_id, created_at, last_message_at")
-      .eq("club_id", clubId)
-      .single();
-    if (relectura) return relectura as Conversacion;
-    throw new Error("No se pudo crear la conversación.");
-  }
+  if (creada) return creada as Conversacion;
 
-  return creada as Conversacion;
+  // 3. Carrera: si otro proceso la insertó justo en paralelo, reintentar lectura
+  const { data: relectura } = await admin
+    .from("conversations")
+    .select("id, club_id, arbitro_id, created_at, last_message_at")
+    .eq("club_id", clubId)
+    .maybeSingle();
+
+  if (relectura) return relectura as Conversacion;
+
+  throw new Error(error?.message ?? "No se pudo crear la conversación.");
 }
 
 /** Conversación individual de un árbitro; si no existe, la crea. */
 export async function obtenerOCrearConversacionArbitro(arbitroId: string): Promise<Conversacion> {
-  const { supabase } = await obtenerUsuarioOError();
+  const { supabase, user } = await obtenerUsuarioOError();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const esAdminUser = profile?.role === "admin";
+  const esElMismoArbitro = user.id === arbitroId;
+
+  if (!esAdminUser && !esElMismoArbitro) {
+    throw new Error("No tenés permiso para acceder a esta conversación.");
+  }
 
   const { data: existente } = await supabase
     .from("conversations")
@@ -270,23 +302,24 @@ export async function obtenerOCrearConversacionArbitro(arbitroId: string): Promi
 
   if (existente) return existente as Conversacion;
 
-  const { data: creada, error } = await supabase
+  const admin = createLfsAdminClient();
+  const { data: creada, error } = await admin
     .from("conversations")
     .insert({ arbitro_id: arbitroId })
     .select("id, club_id, arbitro_id, created_at, last_message_at")
     .single();
 
-  if (error) {
-    const { data: relectura } = await supabase
-      .from("conversations")
-      .select("id, club_id, arbitro_id, created_at, last_message_at")
-      .eq("arbitro_id", arbitroId)
-      .single();
-    if (relectura) return relectura as Conversacion;
-    throw new Error("No se pudo crear la conversación.");
-  }
+  if (creada) return creada as Conversacion;
 
-  return creada as Conversacion;
+  const { data: relectura } = await admin
+    .from("conversations")
+    .select("id, club_id, arbitro_id, created_at, last_message_at")
+    .eq("arbitro_id", arbitroId)
+    .maybeSingle();
+
+  if (relectura) return relectura as Conversacion;
+
+  throw new Error(error?.message ?? "No se pudo crear la conversación.");
 }
 
 /** Club del usuario logueado (rol club). */
@@ -556,7 +589,7 @@ export async function enviarMensaje(formData: FormData) {
     attachment_type = archivo.type;
   }
 
-  const { data: mensaje, error: errorMensaje } = await supabase
+  let { data: mensaje, error: errorMensaje } = await supabase
     .from("messages")
     .insert({
       conversation_id: conversacionId,
@@ -569,7 +602,26 @@ export async function enviarMensaje(formData: FormData) {
     .select(SELECT_MENSAJE)
     .single();
 
-  if (errorMensaje) return { error: "No se pudo enviar el mensaje." };
+  if (errorMensaje) {
+    const admin = createLfsAdminClient();
+    const resAdmin = await admin
+      .from("messages")
+      .insert({
+        conversation_id: conversacionId,
+        sender_id: user.id,
+        body: body || null,
+        attachment_path,
+        attachment_name,
+        attachment_type,
+      })
+      .select(SELECT_MENSAJE)
+      .single();
+
+    if (resAdmin.error || !resAdmin.data) {
+      return { error: resAdmin.error?.message ?? "No se pudo enviar el mensaje." };
+    }
+    mensaje = resAdmin.data;
+  }
 
   revalidarMensajeria();
   return { mensaje };
@@ -667,7 +719,7 @@ export async function enviarComunicado(formData: FormData) {
           ? await obtenerOCrearConversacion(destino.id)
           : await obtenerOCrearConversacionArbitro(destino.id);
 
-      const { error } = await supabase.from("messages").insert({
+      let { error } = await supabase.from("messages").insert({
         conversation_id: conversacion.id,
         sender_id: user.id,
         body: cuerpoHtml,
@@ -676,7 +728,20 @@ export async function enviarComunicado(formData: FormData) {
         attachment_type,
         metadata,
       });
-      if (error) throw error;
+
+      if (error) {
+        const admin = createLfsAdminClient();
+        const resAdmin = await admin.from("messages").insert({
+          conversation_id: conversacion.id,
+          sender_id: user.id,
+          body: cuerpoHtml,
+          attachment_path,
+          attachment_name,
+          attachment_type,
+          metadata,
+        });
+        if (resAdmin.error) throw resAdmin.error;
+      }
       enviados += 1;
     } catch {
       fallidos.push(destino.nombre);
